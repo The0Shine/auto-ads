@@ -1,0 +1,32 @@
+{
+  "name": "auto-ads-platform",
+  "version": "0.1.0",
+  "description": "Auto-Ads: Cross-border advertising automation platform",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "docker compose up -d",
+    "dev:down": "docker compose down",
+    "dev:logs": "docker compose logs -f",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "keywords": [
+    "advertising",
+    "automation",
+    "facebook-ads",
+    "google-ads",
+    "tiktok-ads",
+    "cross-border",
+    "microservices"
+  ],
+  "license": "UNLICENSED"
+}

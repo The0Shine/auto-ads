@@ -1,0 +1,252 @@
+# ==============================================================================
+# Auto-Ads Platform — Docker Compose (Development)
+# Services: Gateway, Auth, Campaign, Facebook Adapter, AI Optimizer
+# ==============================================================================
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Infrastructure
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: autoads-postgres
+    environment:
+      POSTGRES_USER: autoads
+      POSTGRES_PASSWORD: autoads_dev
+      POSTGRES_DB: autoads
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoads}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: autoads-timescaledb
+    environment:
+      POSTGRES_USER: ${TIMESCALE_USER:-autoads}
+      POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:-autoads_dev}
+      POSTGRES_DB: ${TIMESCALE_DB:-autoads_metrics}
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./database/init-timescale:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER:-autoads}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: autoads-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-autoads_dev}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-autoads_dev}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: autoads-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: autoads-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: autoads-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Application Services
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: autoads-api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-dev_jwt_secret_min_32_characters_long}
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - CAMPAIGN_SERVICE_URL=http://campaign-service:3003
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-autoads_dev}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: autoads-auth-service
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-autoads}:${POSTGRES_PASSWORD:-autoads_dev}@postgres:5432/${POSTGRES_DB:-autoads}
+      - JWT_SECRET=${JWT_SECRET:-dev_jwt_secret_min_32_characters_long}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-15m}
+      - JWT_REFRESH_EXPIRES_DAYS=7
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-autoads_dev}
+      - FB_APP_ID=${FB_APP_ID}
+      - FB_APP_SECRET=${FB_APP_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  campaign-service:
+    build:
+      context: ./services/campaign-service
+      dockerfile: Dockerfile
+    container_name: autoads-campaign-service
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-autoads}:${POSTGRES_PASSWORD:-autoads_dev}@postgres:5432/${POSTGRES_DB:-autoads}
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-autoads_dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Facebook Adapter
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  facebook-adapter:
+    build:
+      context: ./services/facebook-adapter
+      dockerfile: Dockerfile
+    container_name: autoads-facebook-adapter
+    ports:
+      - "3010:3010"
+    environment:
+      - PORT=3010
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-autoads}:${POSTGRES_PASSWORD:-autoads_dev}@postgres:5432/${POSTGRES_DB:-autoads}
+      - TIMESCALE_URL=postgresql://${TIMESCALE_USER:-autoads}:${TIMESCALE_PASSWORD:-autoads_dev}@timescaledb:5432/${TIMESCALE_DB:-autoads_metrics}
+      - KAFKA_BROKERS=kafka:9092
+      - FB_APP_ID=${FB_APP_ID}
+      - FB_APP_SECRET=${FB_APP_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # AI Optimizer (Python)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  ai-optimizer:
+    build:
+      context: ./services/ai-optimizer
+      dockerfile: Dockerfile
+    container_name: autoads-ai-optimizer
+    ports:
+      - "8000:8000"
+    environment:
+      - TIMESCALE_URL=postgresql://${TIMESCALE_USER:-autoads}:${TIMESCALE_PASSWORD:-autoads_dev}@timescaledb:5432/${TIMESCALE_DB:-autoads_metrics}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-autoads}:${POSTGRES_PASSWORD:-autoads_dev}@postgres:5432/${POSTGRES_DB:-autoads}
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-autoads_dev}
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+  tiktok-adapter:
+    build:
+      context: ./services/tiktok-adapter
+      dockerfile: Dockerfile
+    container_name: autoads-tiktok-adapter
+    ports:
+      - "3011:3011"
+    environment:
+      - PORT=3011
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-autoads}:${POSTGRES_PASSWORD:-autoads_dev}@postgres:5432/${POSTGRES_DB:-autoads}
+      - TIMESCALE_URL=postgresql://${TIMESCALE_USER:-autoads}:${TIMESCALE_PASSWORD:-autoads_dev}@timescaledb:5432/${TIMESCALE_DB:-autoads_metrics}
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+    container_name: autoads-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api-gateway
+
+volumes:
+  postgres_data:
+  timescale_data:
+  redis_data:
+  minio_data:
