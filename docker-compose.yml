@@ -190,6 +190,9 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - FB_APP_ID=${FB_APP_ID}
       - FB_APP_SECRET=${FB_APP_SECRET}
+
+      - FB_MOCK_MODE=true
+      - MOCK_FB_URL=http://ads-virtual-server:4001
     depends_on:
       postgres:
         condition: service_healthy
@@ -250,3 +253,21 @@ volumes:
   timescale_data:
   redis_data:
   minio_data:
+
+# ─────────────────────────────────────────────────────────────────────────────
+  # Ads Virtual Server (Mock Meta Ads)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  ads-virtual-server:
+    build:
+      context: ./services/ads-virtual-server
+      dockerfile: Dockerfile
+    container_name: autoads-ads-virtual-server
+    ports:
+      - "4001:4001"
+    environment:
+      - NODE_ENV=development
+      - TIMESCALE_URL=postgresql://autoads:autoads_dev@timescaledb:5432/autoads_metrics
+    depends_on:
+      postgres:
+        condition: service_healthy

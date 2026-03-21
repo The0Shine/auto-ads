@@ -2,6 +2,10 @@
 // Facebook Marketing API Client
 // =============================================================================
 
+//
+const axios = require('axios');
+//
+
 const bizSdk = require('facebook-nodejs-business-sdk');
 
 const AdAccount = bizSdk.AdAccount;
@@ -57,6 +61,17 @@ function initFacebookSDK() {
  * @returns {string} Facebook Campaign ID
  */
 async function createFacebookCampaign(campaign) {
+  // MOCK MODE
+  if (process.env.FB_MOCK_MODE === 'true') {
+    const res = await axios.post(
+      `${process.env.MOCK_FB_URL}/campaigns`,
+      { name: campaign.name }
+    );
+
+    console.log('[MOCK FB] Campaign created:', res.data.id);
+    return res.data.id;
+  }
+  // REAL FACEBOOK
   const adAccount = initFacebookSDK();
 
   const fbObjective = OBJECTIVE_MAP[campaign.objective] || 'OUTCOME_TRAFFIC';

@@ -121,3 +121,16 @@ SELECT add_continuous_aggregate_policy('metrics_daily',
 
 -- Data retention: keep raw metrics for 90 days
 SELECT add_retention_policy('ad_metrics', INTERVAL '90 days');
+
+-- ─── Campaigns Metrics ───────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS campaign_metrics (
+  time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  campaign_id TEXT,
+  impressions INT,
+  clicks INT,
+  spend DOUBLE PRECISION
+);
+
+SELECT create_hypertable('campaign_metrics', 'time', if_not_exists => TRUE);
+
