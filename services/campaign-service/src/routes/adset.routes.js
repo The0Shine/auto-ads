@@ -12,7 +12,10 @@ const router = express.Router();
 
 router.post('/:campaignId/ad-sets', [
   body('name').isString().notEmpty(),
-  body('budget').optional().isNumeric(),
+  body('budget').optional().isNumeric().custom(v => {
+    if (v != null && Number(v) < 1) throw new Error('budget must be at least 1');
+    return true;
+  }),
   body('budgetType').optional().isIn(['DAILY', 'LIFETIME']),
 ], async (req, res, next) => {
   try {

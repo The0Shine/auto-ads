@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import {
   Steps, Form, Input, Select, InputNumber, DatePicker, Button, Card,
   Row, Col, message, Typography, Divider, Upload, Progress, Tag, Space,
@@ -42,10 +42,11 @@ const OPT_GOALS = [
 ];
 
 const CREATIVE_TYPES = [
-  { value: 'IMAGE',    label: 'Image' },
-  { value: 'VIDEO',    label: 'Video' },
-  { value: 'CAROUSEL', label: 'Carousel' },
-  { value: 'TEXT',     label: 'Text only' },
+  { value: 'IMAGE',      label: 'Image' },
+  { value: 'VIDEO',      label: 'Video' },
+  { value: 'CAROUSEL',   label: 'Carousel' },
+  { value: 'COLLECTION', label: 'Collection' },
+  { value: 'TEXT',        label: 'Text only' },
 ];
 
 const CTAS = [

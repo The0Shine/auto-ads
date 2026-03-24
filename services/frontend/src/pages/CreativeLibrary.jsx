@@ -11,10 +11,11 @@ const typeIcons = {
   VIDEO: <VideoCameraOutlined />,
   CAROUSEL: <PictureOutlined />,
   COLLECTION: <PictureOutlined />,
+  TEXT: <LinkOutlined />,
 };
 
 const typeColors = {
-  IMAGE: 'blue', VIDEO: 'magenta', CAROUSEL: 'cyan', COLLECTION: 'green',
+  IMAGE: 'blue', VIDEO: 'magenta', CAROUSEL: 'cyan', COLLECTION: 'green', TEXT: 'orange',
 };
 
 export default function CreativeLibrary() {
@@ -217,6 +218,7 @@ export default function CreativeLibrary() {
               { value: 'VIDEO',      label: '🎥 Video' },
               { value: 'CAROUSEL',   label: '🎠 Carousel' },
               { value: 'COLLECTION', label: '📦 Collection' },
+              { value: 'TEXT',        label: '📝 Text only' },
             ]} />
           </Form.Item>
 
@@ -269,7 +271,11 @@ export default function CreativeLibrary() {
               { value: 'DOWNLOAD',   label: 'Tải xuống' },
             ]} />
           </Form.Item>
-          <Form.Item name="destinationUrl" label="URL đích">
+          <Form.Item
+            name="destinationUrl"
+            label="URL đích"
+            rules={[{ type: 'url', message: 'URL không hợp lệ (VD: https://example.com)' }]}
+          >
             <Input placeholder="https://..." />
           </Form.Item>
           <Form.Item>

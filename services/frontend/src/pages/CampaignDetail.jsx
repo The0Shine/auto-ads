@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card, Tabs, Descriptions, Tag, Button, Space, Table, message, Modal, Form,
-  Input, InputNumber, Select, Typography, Row, Col, Spin, Statistic, Alert, DatePicker, Divider,
+  Input, InputNumber, Select, Typography, Row, Col, Spin, Statistic, Alert, DatePicker, Divider, Tooltip,
 } from 'antd';
 import {
   PlayCircleOutlined, PauseCircleOutlined, DeleteOutlined, PlusOutlined,
@@ -233,8 +233,8 @@ export default function CampaignDetail() {
         type: values.creativeType || 'IMAGE',
         headline: values.headline,
         body: values.body,
-        destination_url: values.destinationUrl,
-        call_to_action: values.callToAction,
+        destinationUrl: values.destinationUrl,
+        callToAction: values.callToAction,
       });
       const newCreative = data.data;
       const updated = [...creatives, newCreative];
@@ -355,9 +355,22 @@ export default function CampaignDetail() {
           </div>
         </Space>
         <Space>
-          {campaign.status === 'DRAFT' && (
-            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleDistribute}>Phân phối</Button>
-          )}
+          {campaign.status === 'DRAFT' && (() => {
+            const adSets = campaign.ad_sets || [];
+            const allHaveAds = adSets.length > 0 && adSets.every(as => (as.ads || []).length > 0);
+            const reason = adSets.length === 0
+              ? 'Cần thêm ít nhất 1 Ad Set trước khi phân phối'
+              : !allHaveAds
+                ? 'Mỗi Ad Set cần có ít nhất 1 Ad (với Creative)'
+                : '';
+            return (
+              <Tooltip title={reason || undefined}>
+                <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleDistribute} disabled={!allHaveAds}>
+                  Phân phối
+                </Button>
+              </Tooltip>
+            );
+          })()}
           {['ACTIVE', 'DISTRIBUTING'].includes(campaign.status) && (
             <Button icon={<PauseCircleOutlined />} onClick={handlePause}>Tạm dừng</Button>
           )}
@@ -439,7 +452,7 @@ export default function CampaignDetail() {
           children: (
             <div>
               {!insights ? (
-                <Card style={CARD_STYLE} style={{ textAlign: 'center', padding: 40 }}>
+                <Card style={{ ...CARD_STYLE, textAlign: 'center', padding: 40 }}>
                   <Spin />
                 </Card>
               ) : (
@@ -689,7 +702,13 @@ export default function CampaignDetail() {
               </Col>
               <Col span={8}>
                 <Form.Item name="creativeType" label="Loại" initialValue="IMAGE" style={{ marginBottom: 8 }}>
-                  <Select options={[{ value: 'IMAGE', label: 'Image' }, { value: 'VIDEO', label: 'Video' }, { value: 'CAROUSEL', label: 'Carousel' }]} />
+                  <Select options={[
+                    { value: 'IMAGE', label: 'Image' },
+                    { value: 'VIDEO', label: 'Video' },
+                    { value: 'CAROUSEL', label: 'Carousel' },
+                    { value: 'COLLECTION', label: 'Collection' },
+                    { value: 'TEXT', label: 'Text only' },
+                  ]} />
                 </Form.Item>
               </Col>
             </Row>
@@ -701,6 +720,15 @@ export default function CampaignDetail() {
             </Form.Item>
             <Form.Item name="body" label="Mô tả (tuỳ chọn)" style={{ marginBottom: 8 }}>
               <Input.TextArea rows={2} placeholder="Nội dung quảng cáo..." />
+            </Form.Item>
+            <Form.Item name="callToAction" label="Call to Action (tuỳ chọn)" style={{ marginBottom: 8 }}>
+              <Select allowClear placeholder="Chọn CTA" size="small" options={[
+                { value: 'LEARN_MORE', label: 'Tìm hiểu thêm' },
+                { value: 'SHOP_NOW', label: 'Mua ngay' },
+                { value: 'SIGN_UP', label: 'Đăng ký' },
+                { value: 'CONTACT_US', label: 'Liên hệ' },
+                { value: 'DOWNLOAD', label: 'Tải xuống' },
+              ]} />
             </Form.Item>
             <Button htmlType="submit" loading={savingCreative} size="small">
               + Tạo creative này

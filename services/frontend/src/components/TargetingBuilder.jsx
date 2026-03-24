@@ -94,7 +94,23 @@ export default function TargetingBuilder({ form, required = false }) {
           </Form.Item>
         </Col>
         <Col span={6}>
-          <Form.Item name="ageMax" label="Tuổi đến" initialValue={65}>
+          <Form.Item
+            name="ageMax"
+            label="Tuổi đến"
+            initialValue={65}
+            dependencies={['ageMin']}
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const ageMin = getFieldValue('ageMin');
+                  if (value != null && ageMin != null && value < ageMin) {
+                    return Promise.reject(new Error('Tuổi đến phải >= Tuổi từ'));
+                  }
+                  return Promise.resolve();
+                },
+              }),
+            ]}
+          >
             <InputNumber min={13} max={65} style={{ width: '100%' }} />
           </Form.Item>
         </Col>

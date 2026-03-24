@@ -15,8 +15,17 @@ const router = express.Router();
 router.post('/', [
   body('name').isString().notEmpty().withMessage('Campaign name is required'),
   body('objective').isIn(['AWARENESS', 'TRAFFIC', 'ENGAGEMENT', 'LEADS', 'CONVERSIONS', 'SALES']),
-  body('totalBudget').optional().isNumeric(),
-  body('dailyBudget').optional().isNumeric(),
+  body('totalBudget').isNumeric().withMessage('totalBudget is required').custom(v => {
+    if (Number(v) < 1) throw new Error('totalBudget must be at least 1');
+    return true;
+  }),
+  body('dailyBudget').optional().isNumeric().custom((v, { req }) => {
+    if (v != null && req.body.totalBudget != null && Number(v) > Number(req.body.totalBudget)) {
+      throw new Error('dailyBudget must not exceed totalBudget');
+    }
+    if (v != null && Number(v) < 1) throw new Error('dailyBudget must be at least 1');
+    return true;
+  }),
   body('currency').optional().isString(),
   body('startDate').optional().isISO8601(),
   body('endDate').optional().isISO8601(),

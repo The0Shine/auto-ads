@@ -53,7 +53,7 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
 
 router.post('/', [
   body('name').isString().notEmpty(),
-  body('type').isIn(['IMAGE', 'VIDEO', 'CAROUSEL', 'COLLECTION']),
+  body('type').isIn(['IMAGE', 'VIDEO', 'CAROUSEL', 'COLLECTION', 'TEXT']),
   body('headline').optional().isString(),
   body('body').optional().isString(),
   body('callToAction').optional().isString(),
