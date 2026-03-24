@@ -57,7 +57,11 @@ app.use(createProxyMiddleware({
 
 // 1. Run auth middleware first
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/v1/campaigns') || req.path.startsWith('/api/v1/creatives')) {
+  if (
+    req.path.startsWith('/api/v1/campaigns') ||
+    req.path.startsWith('/api/v1/creatives') ||
+    req.path.startsWith('/api/v1/targeting')
+  ) {
     return authMiddleware(req, res, next);
   }
   next();
@@ -65,12 +69,13 @@ app.use((req, res, next) => {
 
 // 2. Proxy
 app.use(createProxyMiddleware({
-  pathFilter: ['/api/v1/campaigns', '/api/v1/creatives'],
+  pathFilter: ['/api/v1/campaigns', '/api/v1/creatives', '/api/v1/targeting'],
   target: CAMPAIGN_SERVICE,
   changeOrigin: true,
-  pathRewrite: { 
+  pathRewrite: {
     '^/api/v1/campaigns': '/campaigns',
-    '^/api/v1/creatives': '/creatives'
+    '^/api/v1/creatives': '/creatives',
+    '^/api/v1/targeting': '/targeting',
   },
   logger: console,
 }));

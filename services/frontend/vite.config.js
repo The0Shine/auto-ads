@@ -6,6 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api/v1/optimizer': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace('/api/v1/optimizer', '/optimizer'),
+      },
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,

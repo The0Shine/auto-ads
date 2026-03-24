@@ -3,6 +3,7 @@
 // =============================================================================
 
 const express = require('express');
+const axios   = require('axios');
 const { body, validationResult } = require('express-validator');
 const { AppError } = require('../middleware/error');
 const { publishEvent, TOPICS } = require('../kafka/kafka.producer');
@@ -209,30 +210,82 @@ router.post('/:id/distribute', async (req, res, next) => {
       throw new AppError('Campaign must be in DRAFT or PAUSED status to distribute', 400);
     }
 
-    // Get ad sets with ads
-    const adSets = await db.query('SELECT * FROM ad_sets WHERE campaign_id = $1', [id]);
+    // Fetch ad_sets
+    const adSets = await db.query(
+      'SELECT * FROM ad_sets WHERE campaign_id = $1 ORDER BY created_at',
+      [id]
+    );
     if (adSets.rows.length === 0) {
       throw new AppError('Campaign must have at least 1 ad set before distributing', 400);
     }
 
+    // Fetch ads joined with creative fields for every ad_set
+    // All columns use snake_case (DB convention) — handler.js reads them as-is
+    const adSetIds = adSets.rows.map(r => r.id);
+    const adsResult = await db.query(
+      `SELECT
+         a.id,
+         a.ad_set_id,
+         a.creative_id,
+         a.name,
+         a.status,
+         c.headline,
+         c.body,
+         c.call_to_action,
+         c.destination_url,
+         c.media_urls,
+         c.type          AS creative_type,
+         c.thumbnail_url
+       FROM ads a
+       LEFT JOIN creatives c ON a.creative_id = c.id
+       WHERE a.ad_set_id = ANY($1)
+       ORDER BY a.created_at`,
+      [adSetIds]
+    );
+
+    // Validate: every ad set must have at least 1 ad
+    const adSetIdsWithAds = new Set(adsResult.rows.map(a => a.ad_set_id));
+    const emptySets = adSets.rows.filter(s => !adSetIdsWithAds.has(s.id));
+    if (emptySets.length > 0) {
+      throw new AppError(
+        `${emptySets.length} ad set(s) have no ads. Add at least 1 ad with a creative to each ad set before distributing.`,
+        400
+      );
+    }
+
+    // Validate: every ad must have a linked creative with at least a headline or media
+    const incompleteAds = adsResult.rows.filter(ad => !ad.creative_id || (!ad.headline && (!ad.media_urls || ad.media_urls.length === 0)));
+    if (incompleteAds.length > 0) {
+      throw new AppError(
+        `${incompleteAds.length} ad(s) missing creative or content (headline/media). IDs: ${incompleteAds.map(a => a.id).join(', ')}`,
+        400
+      );
+    }
+
+    // Nest ads inside their parent ad_set
+    const adSetsWithAds = adSets.rows.map(adSet => ({
+      ...adSet,
+      ads: adsResult.rows.filter(ad => ad.ad_set_id === adSet.id),
+    }));
+
     // Update status → DISTRIBUTING
     await db.query("UPDATE campaigns SET status = 'DISTRIBUTING', updated_at = NOW() WHERE id = $1", [id]);
 
-    // Publish event to Kafka
+    // Publish to Kafka — payload uses snake_case throughout (from DB rows)
     const distributed = await publishEvent(TOPICS.CAMPAIGN_DISTRIBUTE, id, {
-      eventType: 'campaign.distribute',
-      campaignId: id,
-      campaign: campaign.rows[0],
-      adSets: adSets.rows,
+      event_type:  'campaign.distribute',
+      campaign_id: id,
+      campaign:    campaign.rows[0],
+      ad_sets:     adSetsWithAds,
     });
 
     res.json({
       success: true,
       data: {
-        message: distributed ? 'Distribution event published' : 'Distribution queued (Kafka offline)',
-        campaignId: id,
-        status: 'DISTRIBUTING',
-        adSetsCount: adSets.rows.length,
+        message:      distributed ? 'Distribution event published' : 'Distribution queued (Kafka offline)',
+        campaign_id:  id,
+        status:       'DISTRIBUTING',
+        ad_sets_count: adSetsWithAds.length,
       },
     });
   } catch (err) {
@@ -309,6 +362,36 @@ router.delete('/:id', async (req, res, next) => {
     if (result.rows.length === 0) throw new AppError('Campaign not found', 404);
 
     res.json({ success: true, data: { message: 'Campaign archived', id } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /:id/insights — Fetch campaign metrics via facebook-adapter ──────
+
+router.get('/:id/insights', async (req, res, next) => {
+  try {
+    const db = req.app.locals.db;
+    const { id } = req.params;
+
+    // Verify campaign exists
+    const campaign = await db.query('SELECT id, status FROM campaigns WHERE id = $1', [id]);
+    if (campaign.rows.length === 0) throw new AppError('Campaign not found', 404);
+
+    const adapterUrl = process.env.FACEBOOK_ADAPTER_URL || 'http://facebook-adapter:3010';
+
+    let insightsData;
+    try {
+      const response = await axios.get(`${adapterUrl}/insights/${id}`, { timeout: 10000 });
+      insightsData = response.data;
+    } catch (err) {
+      if (err.response?.status === 404) {
+        throw new AppError('Campaign has not been distributed to Facebook yet', 404);
+      }
+      throw new AppError(`Insights fetch failed: ${err.message}`, 502);
+    }
+
+    res.json({ success: true, data: insightsData });
   } catch (err) {
     next(err);
   }

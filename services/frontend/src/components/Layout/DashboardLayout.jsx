@@ -10,6 +10,7 @@ import {
   UserOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -19,9 +20,10 @@ const { Sider, Header, Content } = Layout;
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/campaigns', icon: <RocketOutlined />, label: 'Campaigns' },
-  { key: '/creatives', icon: <PictureOutlined />, label: 'Creatives' },
-  { key: '/platforms', icon: <ApiOutlined />, label: 'Platforms' },
-  { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
+  { key: '/creatives',  icon: <PictureOutlined />,    label: 'Creatives' },
+  { key: '/optimizer',  icon: <ExperimentOutlined />, label: 'AI Optimizer' },
+  { key: '/platforms',  icon: <ApiOutlined />,        label: 'Platforms' },
+  { key: '/settings',   icon: <SettingOutlined />,    label: 'Settings' },
 ];
 
 export default function DashboardLayout({ children }) {

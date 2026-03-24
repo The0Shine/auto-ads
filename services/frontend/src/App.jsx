@@ -9,6 +9,9 @@ import CampaignList from './pages/CampaignList';
 import CampaignCreate from './pages/CampaignCreate';
 import CampaignDetail from './pages/CampaignDetail';
 import CreativeLibrary from './pages/CreativeLibrary';
+import AIOptimizer from './pages/AIOptimizer';
+import Platforms from './pages/Platforms';
+import Settings from './pages/Settings';
 
 export default function App() {
   const { user } = useAuth();
@@ -29,6 +32,9 @@ export default function App() {
               <Route path="/campaigns/create" element={<CampaignCreate />} />
               <Route path="/campaigns/:id" element={<CampaignDetail />} />
               <Route path="/creatives" element={<CreativeLibrary />} />
+              <Route path="/optimizer" element={<AIOptimizer />} />
+              <Route path="/platforms" element={<Platforms />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </DashboardLayout>

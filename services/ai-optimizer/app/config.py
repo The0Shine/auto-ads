@@ -9,18 +9,27 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Database
-    database_url: str = "postgresql://autoads:autoads_dev@localhost:5432/autoads"
-    timescale_url: str = "postgresql://autoads:autoads_dev@localhost:5433/autoads_metrics"
+    database_url: str = "postgresql://autoads:autoads_dev@postgres:5432/autoads"
+    timescale_url: str = "postgresql://autoads:autoads_dev@timescaledb:5432/autoads_metrics"
 
     # Kafka
-    kafka_brokers: str = "localhost:9092"
+    kafka_brokers: str = "kafka:9092"
 
     # Redis
-    redis_host: str = "localhost"
+    redis_host: str = "redis"
     redis_port: int = 6379
     redis_password: str = "autoads_dev"
 
-    # Optimization Thresholds (configurable)
+    # Internal service URLs
+    campaign_service_url: str = "http://campaign-service:3003"
+
+    # ML model path
+    ai_model_path: str = "app/model.joblib"
+
+    # AI decision threshold — only act if confidence >= this value
+    ai_confidence_threshold: float = 0.70
+
+    # Optimization Thresholds (configurable per workspace in the future)
     max_cpa_multiplier: float = 3.0
     min_ctr_search: float = 0.005
     min_ctr_social: float = 0.008

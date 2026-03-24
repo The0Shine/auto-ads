@@ -34,7 +34,7 @@ services:
       POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:-autoads_dev}
       POSTGRES_DB: ${TIMESCALE_DB:-autoads_metrics}
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
       - ./database/init-timescale:/docker-entrypoint-initdb.d
@@ -101,6 +101,25 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: autoads-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin};
+      mc mb --ignore-existing local/${S3_BUCKET:-autoads-creatives};
+      mc anonymous set public local/${S3_BUCKET:-autoads-creatives};
+      echo 'MinIO bucket ready';
+      "
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Application Services
@@ -166,10 +185,23 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-autoads_dev}
+      - FACEBOOK_ADAPTER_URL=http://facebook-adapter:3010
+      - MOCK_FB_URL=http://ads-virtual-server:4001
+      - FB_MOCK_MODE=true
+      - FB_ACCESS_TOKEN=${FB_ACCESS_TOKEN:-}
+      - FB_AD_ACCOUNT_ID=${FB_AD_ACCOUNT_ID:-}
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-minioadmin}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-minioadmin}
+      - S3_BUCKET=${S3_BUCKET:-autoads-creatives}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_PUBLIC_URL=${S3_PUBLIC_URL:-http://localhost:9000}
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -193,11 +225,17 @@ services:
 
       - FB_MOCK_MODE=true
       - MOCK_FB_URL=http://ads-virtual-server:4001
+      # Real FB credentials (set in .env, used when FB_MOCK_MODE=false)
+      - FB_ACCESS_TOKEN=${FB_ACCESS_TOKEN:-}
+      - FB_AD_ACCOUNT_ID=${FB_AD_ACCOUNT_ID:-}
+      - FB_PAGE_ID=${FB_PAGE_ID:-}
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      ads-virtual-server:
+        condition: service_started
 
   # ─────────────────────────────────────────────────────────────────────────────
   # AI Optimizer (Python)
@@ -217,9 +255,17 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-autoads_dev}
+      - CAMPAIGN_SERVICE_URL=http://campaign-service:3003
+      - AI_CONFIDENCE_THRESHOLD=0.70
+      - OPTIMIZATION_INTERVAL_MINUTES=60
+      - METRICS_SYNC_INTERVAL_MINUTES=15
     depends_on:
+      postgres:
+        condition: service_healthy
       timescaledb:
         condition: service_healthy
+      campaign-service:
+        condition: service_started
   tiktok-adapter:
     build:
       context: ./services/tiktok-adapter
@@ -261,9 +307,12 @@ services:
       - "4001:4001"
     environment:
       - NODE_ENV=development
-      - TIMESCALE_URL=postgresql://autoads:autoads_dev@timescaledb:5432/autoads_metrics
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-autoads}:${POSTGRES_PASSWORD:-autoads_dev}@postgres:5432/${POSTGRES_DB:-autoads}
+      - TIMESCALE_URL=postgresql://${TIMESCALE_USER:-autoads}:${TIMESCALE_PASSWORD:-autoads_dev}@timescaledb:5432/${TIMESCALE_DB:-autoads_metrics}
     depends_on:
       postgres:
+        condition: service_healthy
+      timescaledb:
         condition: service_healthy
 
 volumes:

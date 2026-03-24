@@ -1,12 +1,53 @@
 // =============================================================================
-// Creative Routes — CRUD (media management)
+// Creative Routes — CRUD + MinIO file upload
 // =============================================================================
 
 const express = require('express');
+const multer  = require('multer');
+const { v4: uuidv4 } = require('uuid');
 const { body, validationResult } = require('express-validator');
 const { AppError } = require('../middleware/error');
+const { uploadFile, deleteFile, extractKey } = require('../lib/storage');
 
 const router = express.Router();
+
+// multer: store in memory (buffer), max 20MB
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 20 * 1024 * 1024 },
+  fileFilter(req, file, cb) {
+    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/quicktime'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new AppError(`File type not allowed: ${file.mimetype}`, 400));
+  },
+});
+
+// ─── POST /upload — Upload file lên MinIO ──────────────────────────────────
+// multipart/form-data: file=<binary>
+// Returns: { url, key, size, mimetype }
+
+router.post('/upload', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded (field name: file)' });
+
+    const userId    = req.headers['x-user-id'] || 'anonymous';
+    const ext       = req.file.originalname.split('.').pop().toLowerCase();
+    const key       = `${userId}/${uuidv4()}.${ext}`;
+    const publicUrl = await uploadFile(req.file.buffer, key, req.file.mimetype);
+
+    res.json({
+      success: true,
+      data: {
+        url:      publicUrl,
+        key,
+        size:     req.file.size,
+        mimetype: req.file.mimetype,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ─── POST / — Tạo Creative ─────────────────────────────────────────────────
 
@@ -95,6 +136,18 @@ router.put('/:id', async (req, res, next) => {
     const db = req.app.locals.db;
     const { name, headline, body: bodyText, callToAction, destinationUrl, mediaUrls, thumbnailUrl } = req.body;
 
+    // If new mediaUrls provided, delete old files from MinIO
+    if (mediaUrls) {
+      const old = await db.query('SELECT media_urls, thumbnail_url FROM creatives WHERE id = $1', [req.params.id]);
+      if (old.rows.length > 0) {
+        const oldUrls = old.rows[0].media_urls || [];
+        for (const url of oldUrls) {
+          const key = extractKey(url);
+          if (key) deleteFile(key).catch(() => {});
+        }
+      }
+    }
+
     const result = await db.query(
       `UPDATE creatives SET
         name = COALESCE($1, name),
@@ -127,6 +180,21 @@ router.put('/:id', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
   try {
     const db = req.app.locals.db;
+
+    // Delete associated files from MinIO
+    const existing = await db.query('SELECT media_urls, thumbnail_url FROM creatives WHERE id = $1', [req.params.id]);
+    if (existing.rows.length > 0) {
+      const { media_urls, thumbnail_url } = existing.rows[0];
+      for (const url of (media_urls || [])) {
+        const key = extractKey(url);
+        if (key) deleteFile(key).catch(() => {});
+      }
+      if (thumbnail_url) {
+        const key = extractKey(thumbnail_url);
+        if (key) deleteFile(key).catch(() => {});
+      }
+    }
+
     const result = await db.query('DELETE FROM creatives WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rows.length === 0) throw new AppError('Creative not found', 404);
     res.json({ success: true, data: { message: 'Creative deleted' } });

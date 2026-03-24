@@ -5,7 +5,7 @@
 const { Kafka } = require('kafkajs');
 const { handleDistribute } = require('../handlers/campaign.handler');
 
-const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'localhost:29092').split(',');
+const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'kafka:9092').split(',');
 
 const kafka = new Kafka({
   clientId: 'facebook-adapter',
@@ -19,15 +19,31 @@ async function connectConsumer() {
     await consumer.connect();
     await consumer.subscribe({ topics: ['campaign.distribute'], fromBeginning: false });
 
-    await consumer.run({
+    // consumer.run() returns a promise that never settles (runs indefinitely)
+    // so we must NOT await it — otherwise the startup hangs.
+    consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
-        const payload = JSON.parse(message.value.toString());
-        console.log(`[Facebook-Kafka] Received event: ${payload.eventType}`);
+        let payload;
+        try {
+          payload = JSON.parse(message.value.toString());
+        } catch {
+          console.warn('[Facebook-Kafka] Invalid JSON message, skipping');
+          return;
+        }
 
-        if (payload.eventType === 'campaign.distribute') {
-          // Only process if 'facebook' is in the target platforms
-          if (payload.campaign.platforms.includes('facebook')) {
-            await handleDistribute(payload);
+        const eventType = payload.event_type || payload.eventType;
+        console.log(`[Facebook-Kafka] Received event: ${eventType} on topic: ${topic}`);
+
+        if (topic === 'campaign.distribute' || eventType === 'campaign.distribute') {
+          const platforms = payload.campaign?.platforms || [];
+          if (platforms.includes('facebook')) {
+            try {
+              await handleDistribute(payload);
+            } catch (err) {
+              console.error(`[Facebook-Kafka] handleDistribute failed: ${err.message}`);
+            }
+          } else {
+            console.log(`[Facebook-Kafka] Skipping — platforms: ${JSON.stringify(platforms)}`);
           }
         }
       },
@@ -39,4 +55,10 @@ async function connectConsumer() {
   }
 }
 
-module.exports = { connectConsumer };
+async function disconnectConsumer() {
+  try {
+    await consumer.disconnect();
+  } catch {}
+}
+
+module.exports = { connectConsumer, disconnectConsumer };

@@ -1,98 +1,152 @@
 // =============================================================================
 // Campaign Handler — Facebook Adapter
+// Consumes campaign.distribute Kafka events and creates entities on Facebook
+// (or ads-virtual-server in mock mode).
 // =============================================================================
 
+const axios  = require('axios');
 const { Pool } = require('pg');
-const { 
-  createFacebookCampaign, 
+const {
+  createFacebookCampaign,
   createFacebookAdSet,
   createFacebookAdCreative,
-  createFacebookAd
+  createFacebookAd,
 } = require('../services/facebook.client');
+const { publishEvent } = require('../kafka/kafka.producer');
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://autoads:autoads_dev@127.0.0.1:5433/autoads',
+  connectionString: process.env.DATABASE_URL || 'postgresql://autoads:autoads_dev@postgres:5432/autoads',
 });
 
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+async function upsertMapping(entity_type, internal_id, platform_id) {
+  try {
+    await pool.query(
+      `INSERT INTO platform_mappings
+         (entity_type, internal_id, platform, platform_id, sync_status, last_synced_at)
+       VALUES ($1, $2, 'facebook', $3, 'SYNCED', NOW())
+       ON CONFLICT (entity_type, internal_id, platform) DO UPDATE SET
+         platform_id    = $3,
+         sync_status    = 'SYNCED',
+         last_synced_at = NOW()`,
+      [entity_type, internal_id, platform_id]
+    );
+  } catch (err) {
+    console.warn(`[Facebook-DB] Could not upsert mapping for ${entity_type} ${internal_id}:`, err.message);
+  }
+}
+
+// ─── Field mapping ───────────────────────────────────────────────────────
+// DB columns (snake_case) → facebook.client.js expected field names
+// This mapping is permanent: DB naming ≠ FB API naming, always need this layer.
+//
+// DB (creatives table)   →  facebook.client param
+// ─────────────────────────────────────────────────
+// media_urls (JSONB [])  →  image_url  (first element)
+// destination_url        →  target_url
+// headline               →  headline   (same ✓)
+// body                   →  message
+// call_to_action         →  call_to_action (same ✓)
+// name (ads table)       →  name       (same ✓)
+
+function mapAdToCreativeParams(ad) {
+  // media_urls arrives from Kafka as a JS array (JSONB parsed by pg)
+  // or as a string if double-serialized — handle both safely
+  let mediaUrls = ad.media_urls;
+  if (typeof mediaUrls === 'string') {
+    try { mediaUrls = JSON.parse(mediaUrls); } catch { mediaUrls = []; }
+  }
+
+  return {
+    name:           ad.name,
+    image_url:      Array.isArray(mediaUrls) ? mediaUrls[0] || null : null,
+    target_url:     ad.destination_url   || null,
+    headline:       ad.headline          || null,
+    message:        ad.body              || null,
+    call_to_action: ad.call_to_action    || null,
+  };
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────
+
 async function handleDistribute(payload) {
-  const { campaign, adSets } = payload;
-  const campaignId = campaign.id;
+  // Kafka payload now uses snake_case throughout (matches DB convention)
+  const { campaign, ad_sets } = payload;
+  const campaign_id = campaign.id;
 
-  console.log(`[Facebook] Processing distribution for campaign: ${campaignId}`);
+  console.log(`[Facebook] Distributing campaign: ${campaign_id}`);
 
-  let fbCampaignId = null;
+  let fb_campaign_id = null;
 
   try {
-    // 1. Create Campaign on Facebook (status: PAUSED → no cost)
-    fbCampaignId = await createFacebookCampaign(campaign);
+    // 1. Create Campaign on Facebook (PAUSED → no cost)
+    fb_campaign_id = await createFacebookCampaign(campaign);
+    await upsertMapping('CAMPAIGN', campaign_id, fb_campaign_id);
 
-    // 2. Save Campaign platform mapping
-    try {
-      await pool.query(
-        `INSERT INTO platform_mappings (entity_type, internal_id, platform, platform_id, sync_status, last_synced_at)
-         VALUES ('CAMPAIGN', $1, 'facebook', $2, 'SYNCED', NOW())
-         ON CONFLICT (entity_type, internal_id, platform) DO UPDATE SET
-         platform_id = $2, sync_status = 'SYNCED', last_synced_at = NOW()`,
-        [campaignId, fbCampaignId]
-      );
-    } catch (dbErr) {
-      console.warn(`[Facebook-DB] Could not save Campaign mapping (DB might be down)`);
-    }
+    // 2. Create each Ad Set
+    for (const adSet of ad_sets) {
+      const fb_ad_set_id = await createFacebookAdSet(adSet, campaign, fb_campaign_id);
+      await upsertMapping('AD_SET', adSet.id, fb_ad_set_id);
 
-    // 3. Create each Ad Set on Facebook (status: PAUSED → no cost)
-    for (const adSet of adSets) {
-      const fbAdSetId = await createFacebookAdSet(adSet, campaign, fbCampaignId);
-
-      try {
-        await pool.query(
-          `INSERT INTO platform_mappings (entity_type, internal_id, platform, platform_id, sync_status, last_synced_at)
-           VALUES ('AD_SET', $1, 'facebook', $2, 'SYNCED', NOW())
-           ON CONFLICT (entity_type, internal_id, platform) DO UPDATE SET
-           platform_id = $2, sync_status = 'SYNCED', last_synced_at = NOW()`,
-          [adSet.id, fbAdSetId]
-        );
-      } catch (dbErr) {
-        console.warn(`[Facebook-DB] Could not save Ad Set mapping`);
-      }
-      // 4. Create Ads under this Ad Set
+      // 3. Create Ads (and their Creatives) under this Ad Set
       if (adSet.ads && adSet.ads.length > 0) {
         for (const ad of adSet.ads) {
-          // Create Creative first
-          const fbCreativeId = await createFacebookAdCreative(ad);
-          
-          // Then create Ad
-          const fbAdId = await createFacebookAd(ad, fbAdSetId, fbCreativeId);
+          // Map DB fields → facebook.client expected params
+          const creativeParams = mapAdToCreativeParams(ad);
 
-          try {
-            await pool.query(
-              `INSERT INTO platform_mappings (entity_type, internal_id, platform, platform_id, sync_status, last_synced_at)
-               VALUES ('AD', $1, 'facebook', $2, 'SYNCED', NOW())
-               ON CONFLICT (entity_type, internal_id, platform) DO UPDATE SET
-               platform_id = $2, sync_status = 'SYNCED', last_synced_at = NOW()`,
-              [ad.id, fbAdId]
-            );
-          } catch (dbErr) {
-            console.warn(`[Facebook-DB] Could not save Ad mapping`);
-          }
+          const fb_creative_id = await createFacebookAdCreative(creativeParams);
+          // No platform_mappings entry for creatives — FB doesn't expose creative IDs
+          // in the same way; we store ad-level mapping only
+
+          const fb_ad_id = await createFacebookAd(creativeParams, fb_ad_set_id, fb_creative_id);
+          await upsertMapping('AD', ad.id, fb_ad_id);
         }
       }
     }
 
-    console.log(`[Facebook] ✅ Successfully distributed campaign ${campaignId} → FB Campaign ${fbCampaignId}`);
-
-  } catch (err) {
-    console.error(`[Facebook] ❌ Error distributing campaign ${campaignId}:`, err.message);
-
-    // Record error in platform_mappings if campaign was already created
-    if (fbCampaignId) {
-      await pool.query(
-        `UPDATE platform_mappings SET sync_status = 'ERROR', error_message = $1
-         WHERE internal_id = $2 AND platform = 'facebook'`,
-        [err.message, campaignId]
-      ).catch(() => {}); // Ignore secondary failure
+    // 4. Trigger metrics simulation (mock mode only)
+    if (process.env.FB_MOCK_MODE === 'true') {
+      try {
+        await axios.post(`${process.env.MOCK_FB_URL}/simulate/metrics`, {
+          campaign_id:  campaign_id,
+          workspace_id: campaign.workspace_id,
+          platform:     'facebook',
+          ad_sets: ad_sets.map(as => ({
+            ad_set_id: as.id,
+            ads: (as.ads || []).map(a => ({ ad_id: a.id })),
+          })),
+        });
+      } catch (err) {
+        console.warn('[Facebook] Metrics simulation trigger failed (non-fatal):', err.message);
+      }
     }
 
-    throw err; // Re-throw so Kafka knows to retry
+    // 5. Publish status feedback → campaign-service will update status to ACTIVE
+    await publishEvent('campaign.status.changed', campaign_id, {
+      event_type:  'campaign.status.changed',
+      campaign_id: campaign_id,
+      old_status:  'DISTRIBUTING',
+      new_status:  'ACTIVE',
+      platform:    'facebook',
+      timestamp:   new Date().toISOString(),
+    });
+
+    console.log(`[Facebook] ✅ Campaign ${campaign_id} → FB ${fb_campaign_id} — DONE`);
+
+  } catch (err) {
+    console.error(`[Facebook] ❌ Error distributing campaign ${campaign_id}:`, err.message);
+
+    if (fb_campaign_id) {
+      await pool.query(
+        `UPDATE platform_mappings
+         SET sync_status = 'ERROR', error_message = $1, updated_at = NOW()
+         WHERE internal_id = $2 AND platform = 'facebook'`,
+        [err.message, campaign_id]
+      ).catch(() => {});
+    }
+
+    throw err; // re-throw so Kafka retries
   }
 }
 

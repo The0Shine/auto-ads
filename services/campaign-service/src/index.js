@@ -9,10 +9,13 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { Pool } = require('pg');
 
-const campaignRoutes = require('./routes/campaign.routes');
-const adSetRoutes = require('./routes/adset.routes');
-const creativeRoutes = require('./routes/creative.routes');
+const campaignRoutes  = require('./routes/campaign.routes');
+const adSetRoutes     = require('./routes/adset.routes');
+const creativeRoutes  = require('./routes/creative.routes');
+const targetingRoutes = require('./routes/targeting.routes');
+const adsRoutes       = require('./routes/ads.routes');
 const { connectProducer, disconnectProducer } = require('./kafka/kafka.producer');
+const { createConsumer } = require('./kafka/kafka.consumer');
 const { errorHandler } = require('./middleware/error');
 
 const app = express();
@@ -43,9 +46,11 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'campaign-service', timestamp: new Date().toISOString() });
 });
 
-app.use('/campaigns', campaignRoutes);
-app.use('/campaigns', adSetRoutes);          // /:campaignId/ad-sets/*
-app.use('/creatives', creativeRoutes);
+app.use('/campaigns',  campaignRoutes);
+app.use('/campaigns',  adSetRoutes);          // /:campaignId/ad-sets/*
+app.use('/campaigns',  adsRoutes);            // /:campaignId/ad-sets/:adSetId/ads/*
+app.use('/creatives',  creativeRoutes);
+app.use('/targeting',  targetingRoutes);      // /targeting/interests, /locations, /images
 
 // ─── Error Handler ──────────────────────────────────────────────────────────
 
@@ -55,9 +60,14 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3003;
 
+const consumer = createConsumer(pool);
+
 async function start() {
   // Connect Kafka producer (non-blocking)
   connectProducer().catch(() => {});
+
+  // Start Kafka consumer — listens for status feedback from adapters
+  consumer.start().catch(() => {});
 
   app.listen(PORT, () => {
     console.log(`📢 Campaign Service running on port ${PORT}`);
@@ -67,6 +77,7 @@ async function start() {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('Shutting down Campaign Service...');
+  await consumer.stop();
   await disconnectProducer();
   await pool.end();
   process.exit(0);

@@ -1,246 +1,228 @@
 # =============================================================================
 # AI Optimizer — Core Optimization Engine
+# Uses trained XGBoost model to predict SCALE / KEEP / PAUSE per ad set,
+# then applies the decision via campaign-service HTTP API.
 # =============================================================================
 
 import logging
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
-from enum import Enum
+from datetime import datetime
+from typing import List, Dict, Any
 
 from app.config import settings
+from app.services.predictor import predictor
+from app.services import db
+from app.services import campaign_client
 
 logger = logging.getLogger(__name__)
 
 
-class OptimizationAction(str, Enum):
-    AUTO_PAUSE = "AUTO_PAUSE"
-    BUDGET_SHIFT = "BUDGET_SHIFT"
-    REACTIVATE = "REACTIVATE"
-    ALERT = "ALERT"
-
-
-@dataclass
-class AdSetMetrics:
-    ad_set_id: str
-    campaign_id: str
-    platform: str
-    impressions: int = 0
-    clicks: int = 0
-    conversions: int = 0
-    spend: float = 0.0
-    revenue: float = 0.0
-    ctr: float = 0.0
-    cpc: float = 0.0
-    cpa: float = 0.0
-    roas: float = 0.0
-    frequency: float = 0.0
-    daily_budget: float = 0.0
-    target_cpa: Optional[float] = None
-
-
-@dataclass
-class OptimizationResult:
-    ad_set_id: str
-    action: OptimizationAction
-    reason: str
-    confidence: float
-    metrics_snapshot: Dict[str, Any]
-    suggested_changes: Dict[str, Any]
-
-
 class OptimizerService:
     """
-    AI-powered ad set optimization engine.
-
-    Evaluates ad set performance using rule-based analysis and ML scoring.
-    Capable of:
-    - Auto-pausing underperforming ad sets
-    - Suggesting budget reallocation
-    - Detecting audience fatigue
-    - Generating performance scores
+    Orchestrates per-campaign AI optimization:
+      1. Load metrics from TimescaleDB
+      2. Run XGBoost prediction per ad set
+      3. Apply PAUSE action if confidence >= threshold
+      4. Log every decision to optimization_logs
     """
-
-    def __init__(self):
-        self.thresholds = {
-            "max_cpa_multiplier": settings.max_cpa_multiplier,
-            "min_ctr_search": settings.min_ctr_search,
-            "min_ctr_social": settings.min_ctr_social,
-            "min_roas": settings.min_roas,
-            "max_spend_without_conversion": settings.max_spend_without_conversion,
-            "min_impressions_for_eval": settings.min_impressions_for_eval,
-            "max_frequency": settings.max_frequency,
-            "max_budget_shift_percent": settings.max_budget_shift_percent,
-        }
 
     async def analyze_campaign(
         self, campaign_id: str, workspace_id: str, force: bool = False
     ) -> Dict[str, Any]:
         """
-        Analyze all ad sets in a campaign and return optimization recommendations.
+        Analyze all ad sets in a campaign and apply optimization recommendations.
+        Returns a summary dict.
         """
-        # TODO: Fetch real metrics from TimescaleDB
-        # For now, return the analysis structure
-        logger.info(f"Analyzing campaign {campaign_id} for workspace {workspace_id}")
+        logger.info(f"[Optimizer] Analyzing campaign {campaign_id}")
+
+        ad_sets = db.get_ad_sets_for_campaign(campaign_id)
+        if not ad_sets:
+            logger.info(f"[Optimizer] No ad sets found for campaign {campaign_id}")
+            return self._empty_summary(campaign_id)
+
+        summary = {"healthy": 0, "paused": 0, "kept": 0, "scaled": 0, "skipped": 0}
+        recommendations = []
+
+        for ad_set in ad_sets:
+            ad_set_id = str(ad_set['id'])
+
+            # Skip already auto-paused ad sets (unless forced)
+            if ad_set.get('auto_paused') and not force:
+                summary['skipped'] += 1
+                continue
+
+            # ── 1. Fetch aggregated metrics from TimescaleDB ──────────────
+            metrics = db.get_metrics_for_ad_set(ad_set_id, days=7)
+            if metrics is None:
+                logger.debug(f"[Optimizer] No metrics for ad_set {ad_set_id}, skipping")
+                summary['skipped'] += 1
+                continue
+
+            impressions = int(metrics.get('impressions') or 0)
+            clicks      = int(metrics.get('clicks')      or 0)
+            spend       = float(metrics.get('spend')     or 0.0)
+
+            if impressions < settings.min_impressions_for_eval:
+                logger.debug(f"[Optimizer] ad_set {ad_set_id}: not enough impressions ({impressions})")
+                summary['skipped'] += 1
+                continue
+
+            # ── 2. Parse targeting for model features ─────────────────────
+            targeting = ad_set.get('targeting') or {}
+            age, gender, interest = predictor.parse_targeting(targeting)
+
+            # ── 3. XGBoost prediction ─────────────────────────────────────
+            action, confidence = predictor.predict(
+                impressions=impressions,
+                clicks=clicks,
+                spent=spend,
+                age=age,
+                gender=gender,
+                interest=interest,
+            )
+
+            logger.info(
+                f"[Optimizer] ad_set {ad_set_id}: action={action} "
+                f"confidence={confidence:.2f} impressions={impressions} spend={spend:.2f}"
+            )
+
+            metrics_snapshot = {
+                "impressions": impressions,
+                "clicks":      clicks,
+                "spend":       spend,
+                "conversions": int(metrics.get('conversions') or 0),
+                "frequency":   float(metrics.get('frequency') or 0),
+            }
+
+            # ── 4. Apply action ───────────────────────────────────────────
+            # confidence = P(conversion). PAUSE when low conversion prob (< 1-threshold).
+            # e.g. threshold=0.70 → pause if confidence < 0.30
+            pause_threshold = 1.0 - settings.ai_confidence_threshold
+            if action == "PAUSE" and confidence <= pause_threshold:
+                reason = (
+                    f"AI auto-pause: confidence={confidence:.0%}, "
+                    f"impressions={impressions}, spend={spend:.2f}"
+                )
+                db.pause_ad_set(ad_set_id, reason)
+                await campaign_client.pause_campaign(campaign_id, reason)
+                db.insert_optimization_log(
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                    ad_set_id=ad_set_id,
+                    action_type="AUTO_PAUSE",
+                    reason=reason,
+                    metrics_snapshot=metrics_snapshot,
+                    old_value={"status": ad_set.get('status', 'ACTIVE')},
+                    new_value={"status": "PAUSED", "auto_paused": True},
+                )
+                summary['paused'] += 1
+
+            elif action == "SCALE":
+                db.insert_optimization_log(
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                    ad_set_id=ad_set_id,
+                    action_type="ALERT",
+                    reason=f"AI recommends SCALE: confidence={confidence:.0%}",
+                    metrics_snapshot=metrics_snapshot,
+                    old_value={},
+                    new_value={"recommendation": "SCALE"},
+                )
+                summary['scaled'] += 1
+
+            else:  # KEEP or PAUSE below threshold
+                db.insert_optimization_log(
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                    ad_set_id=ad_set_id,
+                    action_type="ALERT",
+                    reason=f"AI decision={action}: confidence={confidence:.0%} (below threshold, no action)",
+                    metrics_snapshot=metrics_snapshot,
+                    old_value={},
+                    new_value={"recommendation": action},
+                )
+                summary['kept'] += 1
+
+            pause_applied = action == "PAUSE" and confidence <= pause_threshold
+            recommendations.append({
+                "ad_set_id":  ad_set_id,
+                "action":     action,
+                "confidence": round(confidence, 4),
+                "applied":    pause_applied,
+            })
 
         return {
-            "campaign_id": campaign_id,
-            "analyzed_at": datetime.utcnow().isoformat(),
-            "ad_sets_analyzed": 0,
-            "recommendations": [],
+            "campaign_id":  campaign_id,
+            "analyzed_at":  datetime.utcnow().isoformat(),
+            "ad_sets_analyzed": len(ad_sets),
+            "recommendations":  recommendations,
             "summary": {
-                "total_ad_sets": 0,
-                "healthy": 0,
-                "warning": 0,
-                "critical": 0,
-                "auto_paused": 0,
+                "total_ad_sets": len(ad_sets),
+                **summary,
             },
         }
 
-    def evaluate_ad_set(self, metrics: AdSetMetrics) -> List[OptimizationResult]:
-        """
-        Evaluate a single ad set's performance against thresholds.
-        Returns a list of optimization recommendations.
-        """
-        results: List[OptimizationResult] = []
-
-        # Skip if not enough data
-        if metrics.impressions < self.thresholds["min_impressions_for_eval"]:
-            return results
-
-        snapshot = {
-            "impressions": metrics.impressions,
-            "clicks": metrics.clicks,
-            "conversions": metrics.conversions,
-            "spend": metrics.spend,
-            "ctr": metrics.ctr,
-            "cpa": metrics.cpa,
-            "roas": metrics.roas,
-            "frequency": metrics.frequency,
-        }
-
-        # ── Check 1: CPA too high ────────────────────────────────────────
-        if metrics.target_cpa and metrics.cpa > 0:
-            cpa_threshold = metrics.target_cpa * self.thresholds["max_cpa_multiplier"]
-            if metrics.cpa > cpa_threshold:
-                results.append(OptimizationResult(
-                    ad_set_id=metrics.ad_set_id,
-                    action=OptimizationAction.AUTO_PAUSE,
-                    reason=f"CPA ({metrics.cpa:.2f}) exceeds {self.thresholds['max_cpa_multiplier']}x target ({metrics.target_cpa:.2f})",
-                    confidence=0.85,
-                    metrics_snapshot=snapshot,
-                    suggested_changes={"status": "PAUSED", "auto_paused": True},
-                ))
-
-        # ── Check 2: CTR too low ─────────────────────────────────────────
-        min_ctr = (
-            self.thresholds["min_ctr_search"]
-            if metrics.platform == "google"
-            else self.thresholds["min_ctr_social"]
-        )
-        if metrics.ctr < min_ctr and metrics.impressions > self.thresholds["min_impressions_for_eval"] * 2:
-            results.append(OptimizationResult(
-                ad_set_id=metrics.ad_set_id,
-                action=OptimizationAction.ALERT,
-                reason=f"CTR ({metrics.ctr:.4f}) below minimum threshold ({min_ctr})",
-                confidence=0.7,
-                metrics_snapshot=snapshot,
-                suggested_changes={"warning": "low_ctr"},
-            ))
-
-        # ── Check 3: ROAS too low ────────────────────────────────────────
-        if metrics.roas < self.thresholds["min_roas"] and metrics.spend > 0 and metrics.conversions > 0:
-            results.append(OptimizationResult(
-                ad_set_id=metrics.ad_set_id,
-                action=OptimizationAction.AUTO_PAUSE,
-                reason=f"ROAS ({metrics.roas:.2f}) below minimum ({self.thresholds['min_roas']})",
-                confidence=0.8,
-                metrics_snapshot=snapshot,
-                suggested_changes={"status": "PAUSED", "auto_paused": True},
-            ))
-
-        # ── Check 4: Spending without conversions ────────────────────────
-        if metrics.daily_budget > 0 and metrics.conversions == 0:
-            spend_ratio = metrics.spend / metrics.daily_budget
-            if spend_ratio > self.thresholds["max_spend_without_conversion"]:
-                results.append(OptimizationResult(
-                    ad_set_id=metrics.ad_set_id,
-                    action=OptimizationAction.AUTO_PAUSE,
-                    reason=f"Spent {spend_ratio:.0%} of daily budget with 0 conversions",
-                    confidence=0.75,
-                    metrics_snapshot=snapshot,
-                    suggested_changes={"status": "PAUSED", "auto_paused": True},
-                ))
-
-        # ── Check 5: Audience fatigue (high frequency) ───────────────────
-        if metrics.frequency > self.thresholds["max_frequency"]:
-            results.append(OptimizationResult(
-                ad_set_id=metrics.ad_set_id,
-                action=OptimizationAction.ALERT,
-                reason=f"Frequency ({metrics.frequency:.1f}) exceeds threshold ({self.thresholds['max_frequency']}). Audience fatigue detected.",
-                confidence=0.65,
-                metrics_snapshot=snapshot,
-                suggested_changes={"warning": "audience_fatigue"},
-            ))
-
-        return results
-
-    def calculate_performance_score(self, metrics: AdSetMetrics) -> float:
-        """
-        Calculate a composite performance score (0-100) for an ad set.
-        Uses weighted scoring across multiple KPIs.
-        """
-        if metrics.impressions < 100:
-            return 0.0
-
-        scores = []
-        weights = []
-
-        # CTR score (0-100)
-        if metrics.ctr > 0:
-            ctr_benchmark = 0.02  # 2% CTR as good benchmark
-            ctr_score = min(100, (metrics.ctr / ctr_benchmark) * 100)
-            scores.append(ctr_score)
-            weights.append(0.25)
-
-        # CPA score (inversed — lower is better)
-        if metrics.cpa > 0 and metrics.target_cpa:
-            cpa_ratio = metrics.target_cpa / metrics.cpa  # 1.0 = exactly on target
-            cpa_score = min(100, cpa_ratio * 100)
-            scores.append(cpa_score)
-            weights.append(0.30)
-
-        # ROAS score
-        if metrics.roas > 0:
-            roas_benchmark = 4.0  # 4x ROAS as good benchmark
-            roas_score = min(100, (metrics.roas / roas_benchmark) * 100)
-            scores.append(roas_score)
-            weights.append(0.30)
-
-        # Frequency score (inversed — lower is better)
-        if metrics.frequency > 0:
-            freq_score = max(0, 100 - (metrics.frequency / self.thresholds["max_frequency"]) * 100)
-            scores.append(freq_score)
-            weights.append(0.15)
-
-        if not scores:
-            return 50.0  # Default neutral score
-
-        total_weight = sum(weights)
-        weighted_score = sum(s * w for s, w in zip(scores, weights)) / total_weight
-        return round(weighted_score, 2)
-
     async def get_history(self, campaign_id: str, limit: int = 50) -> List[Dict]:
-        """Get optimization history for a campaign."""
-        # TODO: Query optimization_logs table
-        return []
+        """Get optimization history for a campaign from optimization_logs table."""
+        rows = db.get_optimization_logs(campaign_id, limit)
+        # Convert datetime objects to ISO strings for JSON serialization
+        for row in rows:
+            if isinstance(row.get('created_at'), datetime):
+                row['created_at'] = row['created_at'].isoformat()
+        return rows
 
     async def get_performance_score(self, ad_set_id: str) -> Dict[str, Any]:
-        """Get performance score for an ad set."""
-        # TODO: Fetch metrics and calculate score
+        """Get AI performance score for an ad set."""
+        metrics = db.get_metrics_for_ad_set(ad_set_id, days=7)
+        if metrics is None:
+            return {
+                "ad_set_id":     ad_set_id,
+                "score":         None,
+                "calculated_at": datetime.utcnow().isoformat(),
+                "reason":        "No metrics available",
+            }
+
+        impressions = int(metrics.get('impressions') or 0)
+        clicks      = int(metrics.get('clicks')      or 0)
+        spend       = float(metrics.get('spend')     or 0.0)
+
+        if impressions < 100:
+            return {
+                "ad_set_id":     ad_set_id,
+                "score":         None,
+                "calculated_at": datetime.utcnow().isoformat(),
+                "reason":        f"Not enough impressions ({impressions} < 100)",
+            }
+
+        action, confidence = predictor.predict(impressions, clicks, spend)
+
+        # Map action + confidence to 0-100 score
+        base = {"SCALE": 80, "KEEP": 50, "PAUSE": 20}.get(action, 50)
+        score = round(base + (confidence - 0.5) * 40, 2)
+        score = max(0.0, min(100.0, score))
+
         return {
-            "ad_set_id": ad_set_id,
-            "score": 0,
+            "ad_set_id":     ad_set_id,
+            "score":         score,
+            "action":        action,
+            "confidence":    round(confidence, 4),
             "calculated_at": datetime.utcnow().isoformat(),
-            "details": {},
+            "metrics": {
+                "impressions": impressions,
+                "clicks":      clicks,
+                "spend":       spend,
+            },
+        }
+
+    @staticmethod
+    def _empty_summary(campaign_id: str) -> Dict[str, Any]:
+        return {
+            "campaign_id":      campaign_id,
+            "analyzed_at":      datetime.utcnow().isoformat(),
+            "ad_sets_analyzed": 0,
+            "recommendations":  [],
+            "summary": {
+                "total_ad_sets": 0,
+                "healthy": 0, "paused": 0, "kept": 0,
+                "scaled": 0, "skipped": 0,
+            },
         }

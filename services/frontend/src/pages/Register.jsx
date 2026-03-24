@@ -28,24 +28,57 @@ export default function Register() {
         <h1>AutoAds</h1>
         <p className="subtitle">Tạo tài khoản mới</p>
 
-        <Form layout="vertical" onFinish={onFinish} size="large">
-          <Form.Item name="fullName" rules={[{ required: true, message: 'Nhập họ tên' }]}>
-            <Input prefix={<UserOutlined />} placeholder="Họ và tên" />
+        <Form layout="vertical" onFinish={onFinish} requiredMark={false}>
+          <Form.Item
+            name="fullName"
+            label="Họ và tên"
+            rules={[{ required: true, message: 'Vui lòng nhập họ tên' }]}
+          >
+            <Input
+              prefix={<UserOutlined style={{ color: '#64748B' }} />}
+              placeholder="Nguyễn Văn A"
+              size="large"
+            />
           </Form.Item>
 
-          <Form.Item name="email" rules={[{ required: true, type: 'email', message: 'Email không hợp lệ' }]}>
-            <Input prefix={<MailOutlined />} placeholder="Email" />
+          <Form.Item
+            name="email"
+            label="Email"
+            rules={[
+              { required: true, message: 'Vui lòng nhập email' },
+              { type: 'email', message: 'Email không hợp lệ' },
+            ]}
+          >
+            <Input
+              prefix={<MailOutlined style={{ color: '#64748B' }} />}
+              placeholder="you@example.com"
+              size="large"
+              autoComplete="email"
+            />
           </Form.Item>
 
-          <Form.Item name="password" rules={[{ required: true, min: 8, message: 'Mật khẩu ít nhất 8 ký tự' }]}>
-            <Input.Password prefix={<LockOutlined />} placeholder="Mật khẩu" />
+          <Form.Item
+            name="password"
+            label="Mật khẩu"
+            rules={[
+              { required: true, message: 'Vui lòng nhập mật khẩu' },
+              { min: 8, message: 'Mật khẩu phải có ít nhất 8 ký tự' },
+            ]}
+          >
+            <Input.Password
+              prefix={<LockOutlined style={{ color: '#64748B' }} />}
+              placeholder="Tối thiểu 8 ký tự"
+              size="large"
+              autoComplete="new-password"
+            />
           </Form.Item>
 
           <Form.Item
             name="confirmPassword"
+            label="Xác nhận mật khẩu"
             dependencies={['password']}
             rules={[
-              { required: true, message: 'Xác nhận mật khẩu' },
+              { required: true, message: 'Vui lòng xác nhận mật khẩu' },
               ({ getFieldValue }) => ({
                 validator(_, value) {
                   if (!value || getFieldValue('password') === value) return Promise.resolve();
@@ -54,19 +87,24 @@ export default function Register() {
               }),
             ]}
           >
-            <Input.Password prefix={<LockOutlined />} placeholder="Xác nhận mật khẩu" />
+            <Input.Password
+              prefix={<LockOutlined style={{ color: '#64748B' }} />}
+              placeholder="Nhập lại mật khẩu"
+              size="large"
+              autoComplete="new-password"
+            />
           </Form.Item>
 
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading} block>
-              Đăng ký
+          <Form.Item style={{ marginBottom: 16, marginTop: 8 }}>
+            <Button type="primary" htmlType="submit" loading={loading} block size="large">
+              Tạo tài khoản
             </Button>
           </Form.Item>
         </Form>
 
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ textAlign: 'center', fontSize: 14 }}>
           <span style={{ color: '#94A3B8' }}>Đã có tài khoản? </span>
-          <Link to="/login" style={{ color: '#A29BFE' }}>Đăng nhập</Link>
+          <Link to="/login" style={{ color: '#A29BFE', fontWeight: 500 }}>Đăng nhập</Link>
         </div>
       </div>
     </div>

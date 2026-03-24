@@ -98,6 +98,9 @@ SELECT
     CASE WHEN SUM(clicks) > 0
         THEN SUM(spend) / SUM(clicks)
         ELSE 0 END AS cpc,
+    CASE WHEN SUM(impressions) > 0
+        THEN (SUM(spend) / SUM(impressions)) * 1000
+        ELSE 0 END AS cpm,
     CASE WHEN SUM(conversions) > 0
         THEN SUM(spend) / SUM(conversions)
         ELSE 0 END AS cpa,
@@ -122,15 +125,7 @@ SELECT add_continuous_aggregate_policy('metrics_daily',
 -- Data retention: keep raw metrics for 90 days
 SELECT add_retention_policy('ad_metrics', INTERVAL '90 days');
 
--- ─── Campaigns Metrics ───────────────────────────────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS campaign_metrics (
-  time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  campaign_id TEXT,
-  impressions INT,
-  clicks INT,
-  spend DOUBLE PRECISION
-);
-
-SELECT create_hypertable('campaign_metrics', 'time', if_not_exists => TRUE);
+-- campaign_metrics removed: use ad_metrics (hypertable above) for all metrics.
+-- ad_metrics supports workspace_id, ad_set_id, ad_id, platform dimensions
+-- and pre-computed ctr, cpc, cpm, cpa, roas — consumed by AI Optimizer directly.
 

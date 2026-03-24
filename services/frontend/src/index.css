@@ -1,5 +1,7 @@
 /* ================================================================
    AutoAds — Global Styles
+   Ant Design darkAlgorithm handles component colors.
+   This file covers: layout, auth pages, custom utilities.
    ================================================================ */
 
 * {
@@ -33,10 +35,11 @@ body {
   position: absolute;
   width: 600px;
   height: 600px;
-  background: radial-gradient(circle, rgba(108, 92, 231, 0.15) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(108,92,231,0.15) 0%, transparent 70%);
   top: -200px;
   right: -200px;
   border-radius: 50%;
+  pointer-events: none;
 }
 
 .auth-container::after {
@@ -44,23 +47,24 @@ body {
   position: absolute;
   width: 400px;
   height: 400px;
-  background: radial-gradient(circle, rgba(0, 184, 148, 0.1) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(0,184,148,0.1) 0%, transparent 70%);
   bottom: -100px;
   left: -100px;
   border-radius: 50%;
+  pointer-events: none;
 }
 
 .auth-card {
   width: 100%;
   max-width: 420px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(26,26,53,0.85);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255,255,255,0.08);
   border-radius: 16px;
   padding: 40px;
   position: relative;
   z-index: 1;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
 }
 
 .auth-card h1 {
@@ -80,151 +84,49 @@ body {
   font-size: 14px;
 }
 
-.auth-card .ant-input,
-.auth-card .ant-input-password {
-  background: rgba(255, 255, 255, 0.06) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  color: #E2E8F0 !important;
-  border-radius: 8px !important;
-  height: 44px;
-}
-
-.auth-card .ant-input::placeholder {
-  color: #64748B !important;
-}
-
+/* Auth button */
 .auth-card .ant-btn-primary {
   height: 44px;
-  border-radius: 8px;
   font-weight: 600;
   font-size: 15px;
-  background: linear-gradient(135deg, #6C5CE7, #A29BFE);
-  border: none;
+  background: linear-gradient(135deg, #6C5CE7, #A29BFE) !important;
+  border: none !important;
+  box-shadow: 0 4px 15px rgba(108,92,231,0.4) !important;
 }
-
 .auth-card .ant-btn-primary:hover {
-  background: linear-gradient(135deg, #5B4BD5, #918AED) !important;
+  opacity: 0.9;
 }
 
 /* ─── Dashboard Layout ────────────────────────────────────────── */
 
-.dashboard-layout {
-  min-height: 100vh;
-}
-
 .dashboard-layout .ant-layout-sider {
   background: #141432 !important;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid rgba(255,255,255,0.06) !important;
 }
 
-.dashboard-layout .ant-menu {
+.dashboard-layout .ant-layout-sider .ant-menu {
   background: transparent !important;
-}
-
-.dashboard-layout .ant-menu-item {
-  color: #94A3B8 !important;
-  border-radius: 8px !important;
-  margin: 4px 8px !important;
-}
-
-.dashboard-layout .ant-menu-item-selected {
-  background: rgba(108, 92, 231, 0.15) !important;
-  color: #A29BFE !important;
-}
-
-.dashboard-layout .ant-menu-item:hover {
-  color: #E2E8F0 !important;
+  border-inline-end: none !important;
 }
 
 .dashboard-layout .ant-layout-header {
-  background: rgba(15, 15, 35, 0.8) !important;
+  background: rgba(15,15,35,0.9) !important;
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
   padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 9;
 }
 
 .dashboard-layout .ant-layout-content {
-  background: #0F0F23;
+  background: #0F0F23 !important;
   padding: 24px;
   min-height: calc(100vh - 64px);
 }
-
-/* ─── Cards ───────────────────────────────────────────────────── */
-
-.stat-card {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 24px;
-  transition: all 0.3s ease;
-}
-
-.stat-card:hover {
-  border-color: rgba(108, 92, 231, 0.3);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(108, 92, 231, 0.1);
-}
-
-.stat-card .stat-value {
-  font-size: 32px;
-  font-weight: 700;
-  color: #fff;
-  margin: 8px 0 4px;
-}
-
-.stat-card .stat-label {
-  font-size: 13px;
-  color: #94A3B8;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* ─── Tables ──────────────────────────────────────────────────── */
-
-.dark-table .ant-table {
-  background: transparent !important;
-  color: #E2E8F0;
-}
-
-.dark-table .ant-table-thead > tr > th {
-  background: rgba(255, 255, 255, 0.04) !important;
-  color: #94A3B8 !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
-  font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.dark-table .ant-table-tbody > tr > td {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
-  color: #E2E8F0;
-}
-
-.dark-table .ant-table-tbody > tr:hover > td {
-  background: rgba(108, 92, 231, 0.05) !important;
-}
-
-.dark-table .ant-pagination .ant-pagination-item a {
-  color: #94A3B8;
-}
-
-.dark-table .ant-pagination .ant-pagination-item-active {
-  background: rgba(108, 92, 231, 0.2);
-  border-color: #6C5CE7;
-}
-
-/* ─── Status Tags ─────────────────────────────────────────────── */
-
-.status-draft { color: #94A3B8; background: rgba(148,163,184,0.1); border-color: rgba(148,163,184,0.2); }
-.status-distributing { color: #74B9FF; background: rgba(116,185,255,0.1); border-color: rgba(116,185,255,0.2); }
-.status-active { color: #00B894; background: rgba(0,184,148,0.1); border-color: rgba(0,184,148,0.2); }
-.status-paused { color: #FDCB6E; background: rgba(253,203,110,0.1); border-color: rgba(253,203,110,0.2); }
-.status-archived { color: #636E72; background: rgba(99,110,114,0.1); border-color: rgba(99,110,114,0.2); }
-.status-completed { color: #A29BFE; background: rgba(162,155,254,0.1); border-color: rgba(162,155,254,0.2); }
 
 /* ─── Page Header ─────────────────────────────────────────────── */
 
@@ -235,38 +137,65 @@ body {
   margin-bottom: 24px;
 }
 
-.page-header h2 {
-  font-size: 24px;
-  font-weight: 700;
-  color: #fff;
+/* ─── Stat Cards ──────────────────────────────────────────────── */
+
+.stat-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 20px 24px;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-card:hover {
+  border-color: rgba(108,92,231,0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(108,92,231,0.1);
+}
+
+/* ─── Tables (dark override) ──────────────────────────────────── */
+
+.dark-table .ant-table {
+  background: transparent !important;
+}
+
+.dark-table .ant-table-thead > tr > th,
+.dark-table .ant-table-thead > tr > td {
+  background: rgba(255,255,255,0.03) !important;
+  color: #94A3B8 !important;
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.dark-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(255,255,255,0.04) !important;
+}
+
+.dark-table .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: rgba(108,92,231,0.06) !important;
+}
+
+.dark-table .ant-table-expanded-row > td {
+  background: rgba(255,255,255,0.02) !important;
 }
 
 /* ─── Animations ──────────────────────────────────────────────── */
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
 
 .fade-in {
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn 0.3s ease-out;
 }
 
 /* ─── Scrollbar ───────────────────────────────────────────────── */
 
-::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }

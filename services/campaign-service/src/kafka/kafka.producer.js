@@ -4,7 +4,7 @@
 
 const { Kafka } = require('kafkajs');
 
-const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'localhost:29092').split(',');
+const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'kafka:9092').split(',');
 
 const kafka = new Kafka({
   clientId: 'campaign-service',

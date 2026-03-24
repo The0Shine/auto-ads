@@ -79,6 +79,20 @@ router.post('/register', [
 
     const user = result.rows[0];
 
+    // Auto-create a default workspace for this user (workspace_id = user.id)
+    await db.query(
+      `INSERT INTO workspaces (id, name, owner_id)
+       VALUES ($1, $2, $1)
+       ON CONFLICT (id) DO NOTHING`,
+      [user.id, `${fullName || email.split('@')[0]}'s Workspace`]
+    );
+    await db.query(
+      `INSERT INTO workspace_members (workspace_id, user_id, role)
+       VALUES ($1, $1, 'owner')
+       ON CONFLICT DO NOTHING`,
+      [user.id]
+    );
+
     // Generate tokens
     const accessToken = generateAccessToken(user);
     const refreshToken = await generateRefreshToken(db, user.id);
