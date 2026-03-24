@@ -324,7 +324,7 @@ export default function CampaignDetail() {
   if (!campaign) return null;
 
   // Insights stat data
-  const ins = insights || {};
+  const ins = insights?.data?.[0] || {};
   const insMetrics = [
     { label: 'Impressions', value: ins.impressions ? Number(ins.impressions).toLocaleString() : '—' },
     { label: 'Clicks', value: ins.clicks ? Number(ins.clicks).toLocaleString() : '—' },
