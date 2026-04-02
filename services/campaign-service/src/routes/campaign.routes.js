@@ -19,16 +19,16 @@ router.post('/', [
     if (Number(v) < 1) throw new Error('totalBudget must be at least 1');
     return true;
   }),
-  body('dailyBudget').optional().isNumeric().custom((v, { req }) => {
+  body('dailyBudget').optional({ nullable: true }).isNumeric().custom((v, { req }) => {
     if (v != null && req.body.totalBudget != null && Number(v) > Number(req.body.totalBudget)) {
       throw new Error('dailyBudget must not exceed totalBudget');
     }
     if (v != null && Number(v) < 1) throw new Error('dailyBudget must be at least 1');
     return true;
   }),
-  body('currency').optional().isString(),
-  body('startDate').optional().isISO8601(),
-  body('endDate').optional().isISO8601(),
+  body('currency').optional({ nullable: true }).isString(),
+  body('startDate').optional({ nullable: true }).isISO8601(),
+  body('endDate').optional({ nullable: true }).isISO8601(),
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);

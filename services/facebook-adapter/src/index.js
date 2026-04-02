@@ -3,7 +3,7 @@ const express = require('express');
 const { Pool }  = require('pg');
 const { connectConsumer, disconnectConsumer } = require('./kafka/kafka.consumer');
 const { connectProducer, disconnectProducer } = require('./kafka/kafka.producer');
-const { getInsights } = require('./services/facebook.client');
+const { getInsights, getCredentialsForWorkspace } = require('./services/facebook.client');
 
 const app = express();
 app.use(express.json());
@@ -43,8 +43,16 @@ app.get('/insights/:campaign_id', async (req, res) => {
     }
 
     const fb_campaign_id = mapping.rows[0].platform_id;
+
+    // Look up workspace credentials (for real FB mode)
+    const campaignRow = await pool.query(
+      'SELECT workspace_id FROM campaigns WHERE id = $1', [campaign_id]
+    );
+    const workspace_id = campaignRow.rows[0]?.workspace_id;
+    const credentials = await getCredentialsForWorkspace(pool, workspace_id);
+
     // Pass internal UUID as second arg so mock mode queries ad_metrics correctly
-    const data = await getInsights(fb_campaign_id, 'last_7d', campaign_id);
+    const data = await getInsights(fb_campaign_id, 'last_7d', campaign_id, credentials);
     res.json(data);
   } catch (err) {
     console.error('[Insights] Error:', err.message);

@@ -7,6 +7,7 @@
 const axios  = require('axios');
 const { Pool } = require('pg');
 const {
+  getCredentialsForWorkspace,
   createFacebookCampaign,
   createFacebookAdSet,
   createFacebookAdCreative,
@@ -77,16 +78,19 @@ async function handleDistribute(payload) {
 
   console.log(`[Facebook] Distributing campaign: ${campaign_id}`);
 
+  // Fetch FB credentials from DB (workspace token) or fall back to env vars
+  const credentials = await getCredentialsForWorkspace(pool, campaign.workspace_id);
+
   let fb_campaign_id = null;
 
   try {
     // 1. Create Campaign on Facebook (PAUSED → no cost)
-    fb_campaign_id = await createFacebookCampaign(campaign);
+    fb_campaign_id = await createFacebookCampaign(campaign, credentials);
     await upsertMapping('CAMPAIGN', campaign_id, fb_campaign_id);
 
     // 2. Create each Ad Set
     for (const adSet of ad_sets) {
-      const fb_ad_set_id = await createFacebookAdSet(adSet, campaign, fb_campaign_id);
+      const fb_ad_set_id = await createFacebookAdSet(adSet, campaign, fb_campaign_id, credentials);
       await upsertMapping('AD_SET', adSet.id, fb_ad_set_id);
 
       // 3. Create Ads (and their Creatives) under this Ad Set
@@ -95,11 +99,11 @@ async function handleDistribute(payload) {
           // Map DB fields → facebook.client expected params
           const creativeParams = mapAdToCreativeParams(ad);
 
-          const fb_creative_id = await createFacebookAdCreative(creativeParams);
+          const fb_creative_id = await createFacebookAdCreative(creativeParams, credentials);
           // No platform_mappings entry for creatives — FB doesn't expose creative IDs
           // in the same way; we store ad-level mapping only
 
-          const fb_ad_id = await createFacebookAd(creativeParams, fb_ad_set_id, fb_creative_id);
+          const fb_ad_id = await createFacebookAd(creativeParams, fb_ad_set_id, fb_creative_id, credentials);
           await upsertMapping('AD', ad.id, fb_ad_id);
         }
       }

@@ -37,11 +37,14 @@ const IG_POSITIONS = [
  */
 export default function TargetingBuilder({ form, required = false }) {
   const [interestOptions, setInterestOptions] = useState([]);
-  const [locationOptions, setLocationOptions]   = useState([]);
+  const [locationOptions, setLocationOptions] = useState([]);
+  const [countryOptions,  setCountryOptions]  = useState([]);
   const [loadingInterests, setLoadingInterests] = useState(false);
   const [loadingLocations, setLoadingLocations] = useState(false);
+  const [loadingCountries, setLoadingCountries] = useState(false);
   const interestTimer = useRef(null);
   const locationTimer = useRef(null);
+  const countryTimer  = useRef(null);
 
   // ── Debounced interest search ────────────────────────────────────────────
   const searchInterests = useCallback((q) => {
@@ -77,6 +80,25 @@ export default function TargetingBuilder({ form, required = false }) {
         })));
       } catch { /* empty */ } finally {
         setLoadingLocations(false);
+      }
+    }, 300);
+  }, []);
+
+  // ── Debounced country search ─────────────────────────────────────────────
+  const searchCountries = useCallback((q) => {
+    clearTimeout(countryTimer.current);
+    if (!q || q.length < 1) return;
+    setLoadingCountries(true);
+    countryTimer.current = setTimeout(async () => {
+      try {
+        const { data } = await campaignAPI.searchCountries(q, 15);
+        const items = data.data || [];
+        setCountryOptions(items.map(c => ({
+          value: c.key,
+          label: `${c.name} (${c.key})`,
+        })));
+      } catch { /* empty */ } finally {
+        setLoadingCountries(false);
       }
     }, 300);
   }, []);
@@ -131,10 +153,19 @@ export default function TargetingBuilder({ form, required = false }) {
       <Form.Item
         name="countries"
         label="Quốc gia"
-        rules={required ? [{ required: true, type: 'array', min: 1, message: 'Vui lòng nhập ít nhất 1 quốc gia (VD: VN, US)' }] : []}
-        extra={required ? 'Bắt buộc. Nhập mã quốc gia: VN, US, JP, ...' : undefined}
+        rules={required ? [{ required: true, type: 'array', min: 1, message: 'Chọn ít nhất 1 quốc gia' }] : []}
+        extra="Gõ tên quốc gia để tìm kiếm (VD: Vietnam, Japan...)"
       >
-        <Select mode="tags" placeholder="VD: VN, US, JP" tokenSeparators={[',']} />
+        <Select
+          mode="multiple"
+          showSearch
+          filterOption={false}
+          onSearch={searchCountries}
+          loading={loadingCountries}
+          options={countryOptions}
+          placeholder="Gõ để tìm quốc gia..."
+          notFoundContent={loadingCountries ? 'Đang tìm...' : 'Gõ tên quốc gia'}
+        />
       </Form.Item>
 
       <Form.Item name="cities" label="Thành phố (tìm kiếm)">

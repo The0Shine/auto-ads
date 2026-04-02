@@ -9,11 +9,12 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { Pool } = require('pg');
 
-const campaignRoutes  = require('./routes/campaign.routes');
-const adSetRoutes     = require('./routes/adset.routes');
-const creativeRoutes  = require('./routes/creative.routes');
-const targetingRoutes = require('./routes/targeting.routes');
-const adsRoutes       = require('./routes/ads.routes');
+const campaignRoutes     = require('./routes/campaign.routes');
+const adSetRoutes        = require('./routes/adset.routes');
+const creativeRoutes     = require('./routes/creative.routes');
+const targetingRoutes    = require('./routes/targeting.routes');
+const adsRoutes          = require('./routes/ads.routes');
+const platformConnRoutes = require('./routes/platform-connections.routes');
 const { connectProducer, disconnectProducer } = require('./kafka/kafka.producer');
 const { createConsumer } = require('./kafka/kafka.consumer');
 const { errorHandler } = require('./middleware/error');
@@ -50,7 +51,8 @@ app.use('/campaigns',  campaignRoutes);
 app.use('/campaigns',  adSetRoutes);          // /:campaignId/ad-sets/*
 app.use('/campaigns',  adsRoutes);            // /:campaignId/ad-sets/:adSetId/ads/*
 app.use('/creatives',  creativeRoutes);
-app.use('/targeting',  targetingRoutes);      // /targeting/interests, /locations, /images
+app.use('/targeting',          targetingRoutes);       // /targeting/interests, /locations, /images
+app.use('/platform-connections', platformConnRoutes);  // /platform-connections
 
 // ─── Error Handler ──────────────────────────────────────────────────────────
 

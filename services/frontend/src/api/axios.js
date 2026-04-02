@@ -18,6 +18,10 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  const fbToken = localStorage.getItem('fb_access_token');
+  if (fbToken) {
+    config.headers['X-FB-Token'] = fbToken;
+  }
   return config;
 });
 

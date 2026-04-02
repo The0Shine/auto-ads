@@ -244,4 +244,102 @@ router.post('/logout', authenticateToken, async (req, res, next) => {
   }
 });
 
+// ─── GET /auth/oauth/facebook ──────────────────────────────────────────────
+// Initiate FB OAuth — frontend redirects here with ?token=JWT
+
+router.get('/oauth/facebook', (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ success: false, error: 'token required' });
+
+  const appId       = process.env.FB_APP_ID;
+  const redirectUri = process.env.FB_REDIRECT_URI || 'http://localhost:3000/api/v1/auth/oauth/facebook/callback';
+  const scope       = 'ads_management,ads_read,business_management';
+  const state       = Buffer.from(token).toString('base64url');
+
+  res.redirect(
+    `https://www.facebook.com/v24.0/dialog/oauth` +
+    `?client_id=${appId}` +
+    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&scope=${scope}` +
+    `&response_type=code` +
+    `&state=${state}`
+  );
+});
+
+// ─── GET /auth/oauth/facebook/callback ────────────────────────────────────
+// FB redirects here after user approves
+
+router.get('/oauth/facebook/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  if (error) return res.redirect(`${frontendUrl}/platforms?error=${encodeURIComponent(error)}`);
+  if (!code || !state) return res.redirect(`${frontendUrl}/platforms?error=missing_code`);
+
+  try {
+    // Decode state → JWT → userId
+    const jwtToken = Buffer.from(state, 'base64url').toString('utf8');
+    const decoded  = jwt.verify(jwtToken, JWT_SECRET);
+    const userId   = decoded.userId;
+
+    const appId       = process.env.FB_APP_ID;
+    const appSecret   = process.env.FB_APP_SECRET;
+    const redirectUri = process.env.FB_REDIRECT_URI || 'http://localhost:3000/api/v1/auth/oauth/facebook/callback';
+
+    // Step 1: code → short-lived token
+    const shortRes = await fetch(
+      `https://graph.facebook.com/v24.0/oauth/access_token` +
+      `?client_id=${appId}&client_secret=${appSecret}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}&code=${code}`
+    );
+    const shortData = await shortRes.json();
+    if (shortData.error) throw new Error(shortData.error.message);
+    const shortToken = shortData.access_token;
+
+    // Step 2: short → long-lived token (60 days)
+    const longRes = await fetch(
+      `https://graph.facebook.com/oauth/access_token` +
+      `?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}` +
+      `&fb_exchange_token=${shortToken}`
+    );
+    const longData = await longRes.json();
+    if (longData.error) throw new Error(longData.error.message);
+    const longToken  = longData.access_token;
+    const expiresAt  = new Date(Date.now() + (longData.expires_in || 5184000) * 1000);
+
+    // Step 3: get FB user info + ad accounts
+    const [meRes, accountsRes] = await Promise.all([
+      fetch(`https://graph.facebook.com/me?fields=id,name&access_token=${longToken}`),
+      fetch(`https://graph.facebook.com/me/adaccounts?fields=id,name,account_status&limit=20&access_token=${longToken}`),
+    ]);
+    const meData       = await meRes.json();
+    const accountsData = await accountsRes.json();
+    const adAccounts   = accountsData.data || [];
+
+    // Step 4: upsert into platform_connections
+    const db = req.app.locals.db;
+    await db.query(
+      `INSERT INTO platform_connections
+         (id, user_id, workspace_id, platform, platform_user_id, access_token,
+          token_expires_at, ad_accounts, scopes, status)
+       VALUES (gen_random_uuid(), $1, $1, 'facebook', $2, $3, $4, $5, $6, 'active')
+       ON CONFLICT (user_id, platform, workspace_id)
+       DO UPDATE SET
+         access_token      = $3,
+         platform_user_id  = $2,
+         token_expires_at  = $4,
+         ad_accounts       = $5,
+         status            = 'active',
+         updated_at        = NOW()`,
+      [userId, meData.id, longToken, expiresAt,
+       JSON.stringify(adAccounts), JSON.stringify(['ads_management', 'ads_read'])]
+    );
+
+    res.redirect(`${frontendUrl}/platforms?connected=true`);
+  } catch (err) {
+    console.error('[OAuth FB]', err.message);
+    res.redirect(`${frontendUrl}/platforms?error=${encodeURIComponent(err.message)}`);
+  }
+});
+
 module.exports = router;

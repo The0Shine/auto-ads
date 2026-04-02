@@ -54,10 +54,10 @@ router.post('/upload', upload.single('file'), async (req, res, next) => {
 router.post('/', [
   body('name').isString().notEmpty(),
   body('type').isIn(['IMAGE', 'VIDEO', 'CAROUSEL', 'COLLECTION', 'TEXT']),
-  body('headline').optional().isString(),
-  body('body').optional().isString(),
-  body('callToAction').optional().isString(),
-  body('destinationUrl').optional().isURL(),
+  body('headline').optional({ values: 'null' }).isString(),
+  body('body').optional({ values: 'null' }).isString(),
+  body('callToAction').optional({ values: 'null' }).isString(),
+  body('destinationUrl').optional({ values: 'null' }).isURL(),
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -68,7 +68,9 @@ router.post('/', [
     const db = req.app.locals.db;
     const userId = req.headers['x-user-id'];
 
-    const { name, type, headline, body: bodyText, callToAction, destinationUrl, mediaUrls, thumbnailUrl, metadata } = req.body;
+    const { name, type, headline, body: bodyText, callToAction, destinationUrl, metadata } = req.body;
+    const mediaUrls   = req.body.mediaUrls    || req.body.media_urls    || [];
+    const thumbnailUrl = req.body.thumbnailUrl || req.body.thumbnail_url || null;
 
     const result = await db.query(
       `INSERT INTO creatives (id, workspace_id, created_by, name, type, headline, body, call_to_action, destination_url, media_urls, thumbnail_url, metadata)
@@ -193,6 +195,20 @@ router.delete('/:id', async (req, res, next) => {
         const key = extractKey(thumbnail_url);
         if (key) deleteFile(key).catch(() => {});
       }
+    }
+
+    // Block delete if creative is used by any ads
+    const usedBy = await db.query(
+      `SELECT a.name, c.name AS campaign_name
+       FROM ads a
+       JOIN ad_sets ads ON a.ad_set_id = ads.id
+       JOIN campaigns c ON ads.campaign_id = c.id
+       WHERE a.creative_id = $1 LIMIT 5`,
+      [req.params.id]
+    );
+    if (usedBy.rows.length > 0) {
+      const names = usedBy.rows.map(r => `"${r.name}" (${r.campaign_name})`).join(', ');
+      throw new AppError(`Creative đang được dùng bởi: ${names}. Xóa ad trước.`, 409);
     }
 
     const result = await db.query('DELETE FROM creatives WHERE id = $1 RETURNING id', [req.params.id]);

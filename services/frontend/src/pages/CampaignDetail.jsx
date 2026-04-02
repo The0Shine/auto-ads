@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card, Tabs, Descriptions, Tag, Button, Space, Table, message, Modal, Form,
-  Input, InputNumber, Select, Typography, Row, Col, Spin, Statistic, Alert, DatePicker, Divider, Tooltip,
+  Input, InputNumber, Select, Typography, Row, Col, Spin, Statistic, Alert, DatePicker, Divider, Tooltip, Upload,
 } from 'antd';
 import {
   PlayCircleOutlined, PauseCircleOutlined, DeleteOutlined, PlusOutlined,
-  ArrowLeftOutlined, ThunderboltOutlined, EditOutlined,
+  ArrowLeftOutlined, ThunderboltOutlined, EditOutlined, UploadOutlined, LoadingOutlined, PictureOutlined,
 } from '@ant-design/icons';
 import { campaignAPI } from '../api/campaign.api';
 import { optimizerAPI } from '../api/optimizer.api';
@@ -52,6 +52,10 @@ export default function CampaignDetail() {
   const [creatives, setCreatives]         = useState([]);
   const [creativeForm]                    = Form.useForm();
   const [savingCreative, setSavingCreative] = useState(false);
+  const [quickMediaUrls, setQuickMediaUrls] = useState([]);
+  const [quickUploading, setQuickUploading] = useState(false);
+  const [expandedAdSetIds, setExpandedAdSetIds] = useState([]);
+  const [syncingInsights, setSyncingInsights]   = useState(false);
 
   useEffect(() => { loadCampaign(); }, [id]);
 
@@ -60,6 +64,8 @@ export default function CampaignDetail() {
     try {
       const { data } = await campaignAPI.get(id);
       setCampaign(data.data);
+      // Auto-expand all ad sets on load
+      setExpandedAdSetIds((data.data?.ad_sets || []).map(as => as.id));
     } catch {
       message.error('Không tìm thấy campaign');
       navigate('/campaigns');
@@ -73,6 +79,19 @@ export default function CampaignDetail() {
       const { data } = await campaignAPI.insights(id);
       setInsights(data.data);
     } catch { /* non-fatal */ }
+  };
+
+  const handleSyncInsights = async () => {
+    setSyncingInsights(true);
+    try {
+      const { data } = await campaignAPI.insights(id);
+      setInsights(data.data);
+      message.success('Đã đồng bộ insights');
+    } catch {
+      message.error('Không thể đồng bộ insights');
+    } finally {
+      setSyncingInsights(false);
+    }
   };
 
   const loadOptimizerData = async (adSets) => {
@@ -225,6 +244,21 @@ export default function CampaignDetail() {
     } catch { /* empty */ }
   };
 
+  const handleQuickUpload = async ({ file, onSuccess, onError }) => {
+    setQuickUploading(true);
+    try {
+      const { data } = await campaignAPI.uploadCreativeFile(file);
+      setQuickMediaUrls(prev => [...prev, data.data?.url]);
+      onSuccess(data);
+      message.success(`Đã upload: ${file.name}`);
+    } catch (err) {
+      onError(err);
+      message.error('Upload thất bại');
+    } finally {
+      setQuickUploading(false);
+    }
+  };
+
   const handleQuickCreateCreative = async (values) => {
     setSavingCreative(true);
     try {
@@ -235,6 +269,8 @@ export default function CampaignDetail() {
         body: values.body,
         destinationUrl: values.destinationUrl,
         callToAction: values.callToAction,
+        media_urls:   quickMediaUrls,
+        thumbnail_url: quickMediaUrls[0] || null,
       });
       const newCreative = data.data;
       const updated = [...creatives, newCreative];
@@ -449,8 +485,21 @@ export default function CampaignDetail() {
         {
           key: 'insights',
           label: 'Insights',
-          children: (
+          children: campaign.status === 'DRAFT' ? (
+            <Card style={{ ...CARD_STYLE, textAlign: 'center', padding: 40 }}>
+              <Alert
+                type="info" showIcon
+                message="Campaign chưa được phân phối"
+                description="Insights chỉ khả dụng sau khi campaign được phân phối lên platform. Nhấn 'Phân phối' ở trên để bắt đầu."
+              />
+            </Card>
+          ) : (
             <div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                <Button size="small" loading={syncingInsights} onClick={handleSyncInsights}>
+                  Làm mới Insights
+                </Button>
+              </div>
               {!insights ? (
                 <Card style={{ ...CARD_STYLE, textAlign: 'center', padding: 40 }}>
                   <Spin />
@@ -493,6 +542,21 @@ export default function CampaignDetail() {
                   columns={adSetColumns}
                   rowKey="id"
                   pagination={false}
+                  expandedRowKeys={expandedAdSetIds}
+                  onExpand={(expanded, record) =>
+                    setExpandedAdSetIds(expanded
+                      ? [...expandedAdSetIds.filter(i => i !== record.id), record.id]
+                      : expandedAdSetIds.filter(i => i !== record.id))
+                  }
+                  onRow={(record) => ({
+                    onClick: (e) => {
+                      if (e.target.closest('button')) return;
+                      setExpandedAdSetIds(prev =>
+                        prev.includes(record.id) ? prev.filter(i => i !== record.id) : [...prev, record.id]
+                      );
+                    },
+                    style: { cursor: 'pointer' },
+                  })}
                   expandable={{
                     expandedRowRender: (adSet) => (
                       <div style={{ padding: '8px 0 8px 24px' }}>
@@ -687,7 +751,7 @@ export default function CampaignDetail() {
       </Modal>
 
       {/* Modal Add Ad */}
-      <Modal title="Thêm Ad vào Ad Set" open={addAdModal} onCancel={() => { setAddAdModal(false); creativeForm.resetFields(); }} footer={null} width={560}>
+      <Modal title="Thêm Ad vào Ad Set" open={addAdModal} onCancel={() => { setAddAdModal(false); creativeForm.resetFields(); setQuickMediaUrls([]); }} footer={null} width={560}>
         {/* Bước 1: Tạo creative nhanh nếu chưa có hoặc muốn thêm mới */}
         <div style={{ marginBottom: 16 }}>
           <Text style={{ color: '#94A3B8', fontSize: 13 }}>
@@ -730,6 +794,26 @@ export default function CampaignDetail() {
                 { value: 'DOWNLOAD', label: 'Tải xuống' },
               ]} />
             </Form.Item>
+            <Form.Item label="Ảnh / Media" style={{ marginBottom: 8 }}>
+              <Upload customRequest={handleQuickUpload} showUploadList={false} accept="image/*,video/*" disabled={quickUploading}>
+                <Button size="small" icon={quickUploading ? <LoadingOutlined /> : <UploadOutlined />} disabled={quickUploading}>
+                  {quickUploading ? 'Đang upload...' : 'Chọn file'}
+                </Button>
+              </Upload>
+              {quickMediaUrls.length > 0 && (
+                <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {quickMediaUrls.map((url, i) => (
+                    <div key={i} style={{ position: 'relative' }}>
+                      <img src={url} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(255,255,255,0.12)' }} />
+                      <Button type="text" danger size="small" icon={<DeleteOutlined />}
+                        style={{ position: 'absolute', top: -6, right: -6, padding: 0, width: 18, height: 18, minWidth: 0, fontSize: 10 }}
+                        onClick={() => setQuickMediaUrls(prev => prev.filter((_, j) => j !== i))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Form.Item>
             <Button htmlType="submit" loading={savingCreative} size="small">
               + Tạo creative này
             </Button>
@@ -750,6 +834,19 @@ export default function CampaignDetail() {
               placeholder={creatives.length === 0 ? 'Tạo creative ở Bước 1 trước...' : 'Chọn creative...'}
               filterOption={(input, opt) => opt.label.toLowerCase().includes(input.toLowerCase())}
               options={creatives.map(c => ({ value: c.id, label: `${c.name} (${c.type})` }))}
+              optionRender={(opt) => {
+                const c = creatives.find(cr => cr.id === opt.value);
+                const thumb = (c?.media_urls || [])[0];
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {thumb
+                      ? <img src={thumb} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />
+                      : <PictureOutlined style={{ fontSize: 24, color: '#6C5CE7', flexShrink: 0 }} />
+                    }
+                    <span>{opt.label}</span>
+                  </div>
+                );
+              }}
             />
           </Form.Item>
           <Form.Item>

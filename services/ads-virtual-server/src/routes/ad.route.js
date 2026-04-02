@@ -6,7 +6,7 @@ const store = new Map();
 
 async function simulateFB(res) {
   await new Promise(r => setTimeout(r, 200));
-  if (Math.random() < 0.05) {
+  if (Math.random() < 0) {
     res.status(429).json({ error: { message: 'User request limit reached', type: 'OAuthException', code: 17 } });
     return false;
   }

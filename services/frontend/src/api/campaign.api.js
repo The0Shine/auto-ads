@@ -43,6 +43,10 @@ export const campaignAPI = {
   // Targeting
   searchInterests: (q, limit = 10) => api.get('/targeting/interests', { params: { q, limit } }),
   searchLocations: (q, type = 'city', limit = 10) => api.get('/targeting/locations', { params: { q, type, limit } }),
+  searchCountries: (q, limit = 10) => api.get('/targeting/locations', { params: { q, type: 'country', limit } }),
   listImages: () => api.get('/targeting/images'),
   uploadImage: (url, name) => api.post('/targeting/images', { url, name }),
+
+  // Platform connections
+  listPlatformConnections: () => api.get('/platform-connections'),
 };

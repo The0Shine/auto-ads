@@ -43,11 +43,50 @@ const BILLING_EVENT_MAP = {
   OUTCOME_SALES:      'IMPRESSIONS',
 };
 
-function initFacebookSDK() {
-  const accessToken = process.env.FB_ACCESS_TOKEN;
-  const adAccountId = process.env.FB_AD_ACCOUNT_ID;
+// ─── Credentials helper ───────────────────────────────────────────────────
+
+/**
+ * Look up FB credentials for a workspace from platform_connections.
+ * Falls back to env vars if not found.
+ * @param {import('pg').Pool} pool
+ * @param {string} workspaceId
+ * @returns {{ accessToken: string, adAccountId: string }}
+ */
+async function getCredentialsForWorkspace(pool, workspaceId) {
+  if (pool && workspaceId) {
+    try {
+      const result = await pool.query(
+        `SELECT access_token, ad_accounts FROM platform_connections
+         WHERE workspace_id = $1 AND platform = 'facebook' AND status = 'active'
+         LIMIT 1`,
+        [workspaceId]
+      );
+      if (result.rows[0]?.access_token) {
+        const row = result.rows[0];
+        // ad_accounts: [{id: 'act_xxx', name: '...', account_status: 1}, ...]
+        let adAccounts = row.ad_accounts;
+        if (typeof adAccounts === 'string') {
+          try { adAccounts = JSON.parse(adAccounts); } catch { adAccounts = []; }
+        }
+        const adAccountId = adAccounts?.[0]?.id || process.env.FB_AD_ACCOUNT_ID;
+        return { accessToken: row.access_token, adAccountId };
+      }
+    } catch (err) {
+      console.warn('[FB] Could not fetch credentials from DB:', err.message);
+    }
+  }
+  // Fallback to env vars
+  return {
+    accessToken: process.env.FB_ACCESS_TOKEN,
+    adAccountId: process.env.FB_AD_ACCOUNT_ID,
+  };
+}
+
+function initFacebookSDK(credentials) {
+  const accessToken = credentials?.accessToken || process.env.FB_ACCESS_TOKEN;
+  const adAccountId = credentials?.adAccountId || process.env.FB_AD_ACCOUNT_ID;
   if (!accessToken || !adAccountId) {
-    throw new Error('FB_ACCESS_TOKEN and FB_AD_ACCOUNT_ID must be set in .env');
+    throw new Error('FB_ACCESS_TOKEN and FB_AD_ACCOUNT_ID must be set (env or platform_connections)');
   }
   bizSdk.FacebookAdsApi.init(accessToken);
   return new AdAccount(adAccountId);
@@ -60,7 +99,7 @@ function initFacebookSDK() {
  * @param {object} campaign - DB row from campaigns table (snake_case)
  * @returns {string} Facebook Campaign ID
  */
-async function createFacebookCampaign(campaign) {
+async function createFacebookCampaign(campaign, credentials) {
   if (process.env.FB_MOCK_MODE === 'true') {
     const res = await axios.post(
       `${process.env.MOCK_FB_URL}/campaigns`,
@@ -70,7 +109,7 @@ async function createFacebookCampaign(campaign) {
     return res.data.id;
   }
 
-  const adAccount   = initFacebookSDK();
+  const adAccount   = initFacebookSDK(credentials);
   const fbObjective = OBJECTIVE_MAP[campaign.objective] || 'OUTCOME_TRAFFIC';
   console.log(`[FB API] Creating campaign "${campaign.name}" objective=${fbObjective}`);
 
@@ -97,7 +136,7 @@ async function createFacebookCampaign(campaign) {
  * @param {string} fbCampaignId
  * @returns {string} Facebook AdSet ID
  */
-async function createFacebookAdSet(adSet, campaign, fbCampaignId) {
+async function createFacebookAdSet(adSet, campaign, fbCampaignId, credentials) {
   // ── Build targeting from DB (fallback to Vietnam defaults) ────────────────
   const dbTargeting = adSet.targeting || {};
   const targeting = _buildFbTargeting(dbTargeting);
@@ -138,7 +177,7 @@ async function createFacebookAdSet(adSet, campaign, fbCampaignId) {
     return res.data.id;
   }
 
-  const adAccount        = initFacebookSDK();
+  const adAccount        = initFacebookSDK(credentials);
   const fbObjective      = OBJECTIVE_MAP[campaign.objective] || 'OUTCOME_TRAFFIC';
   const optimizationGoal = adSet.optimization_goal || OPTIMIZATION_GOAL_MAP[fbObjective];
   const billingEvent     = BILLING_EVENT_MAP[fbObjective];
@@ -213,7 +252,7 @@ function _buildFbTargeting(t) {
 /**
  * Upload image from URL to FB Ad Account, return image hash
  */
-async function uploadImageFromUrl(adAccount, imageUrl) {
+async function uploadImageFromUrl(adAccount, imageUrl, accessToken) {
   const FormData = require('form-data');
   const fs       = require('fs/promises');
   const { createReadStream } = require('fs');
@@ -225,7 +264,7 @@ async function uploadImageFromUrl(adAccount, imageUrl) {
   await fs.writeFile(tempPath, buffer);
 
   try {
-    const token = process.env.FB_ACCESS_TOKEN;
+    const token = accessToken || process.env.FB_ACCESS_TOKEN;
     const url   = `https://graph.facebook.com/v24.0/${adAccount.id}/adimages`;
     const form  = new FormData();
     form.append('access_token', token);
@@ -244,7 +283,7 @@ async function uploadImageFromUrl(adAccount, imageUrl) {
  * @param {object} adDetails - mapped fields (image_url, target_url, headline, message, name)
  * @returns {string} Facebook AdCreative ID
  */
-async function createFacebookAdCreative(adDetails) {
+async function createFacebookAdCreative(adDetails, credentials) {
   if (process.env.FB_MOCK_MODE === 'true') {
     const res = await axios.post(
       `${process.env.MOCK_FB_URL}/adcreatives`,
@@ -254,7 +293,7 @@ async function createFacebookAdCreative(adDetails) {
     return res.data.id;
   }
 
-  const adAccount = initFacebookSDK();
+  const adAccount = initFacebookSDK(credentials);
   const pageId    = process.env.FB_PAGE_ID;
   if (!pageId) throw new Error('FB_PAGE_ID must be set to create an Ad Creative');
 
@@ -266,7 +305,7 @@ async function createFacebookAdCreative(adDetails) {
 
   let imageHash;
   try {
-    imageHash = await uploadImageFromUrl(adAccount, imageUrl);
+    imageHash = await uploadImageFromUrl(adAccount, imageUrl, credentials?.accessToken);
   } catch (err) {
     console.warn(`[FB API] Image upload failed, using picture fallback: ${err.message}`);
   }
@@ -309,7 +348,7 @@ async function createFacebookAdCreative(adDetails) {
  * @param {string} fbCreativeId
  * @returns {string} Facebook Ad ID
  */
-async function createFacebookAd(adDetails, fbAdSetId, fbCreativeId) {
+async function createFacebookAd(adDetails, fbAdSetId, fbCreativeId, credentials) {
   if (process.env.FB_MOCK_MODE === 'true') {
     const res = await axios.post(
       `${process.env.MOCK_FB_URL}/ads`,
@@ -323,7 +362,7 @@ async function createFacebookAd(adDetails, fbAdSetId, fbCreativeId) {
     return res.data.id;
   }
 
-  const adAccount = initFacebookSDK();
+  const adAccount = initFacebookSDK(credentials);
   console.log(`[FB API] Creating Ad "${adDetails.name}" under AdSet ${fbAdSetId}`);
 
   const result = await adAccount.createAd(
@@ -353,7 +392,7 @@ async function createFacebookAd(adDetails, fbAdSetId, fbCreativeId) {
  * @param {string} datePreset
  * @param {string} internalCampaignId - Internal UUID (used in mock mode for ad_metrics lookup)
  */
-async function getInsights(fbCampaignId, datePreset = 'last_7d', internalCampaignId = null) {
+async function getInsights(fbCampaignId, datePreset = 'last_7d', internalCampaignId = null, credentials = null) {
   if (process.env.FB_MOCK_MODE === 'true') {
     // Mock mode: ad_metrics is keyed by internal UUID, not FB ID
     const queryId = internalCampaignId || fbCampaignId;
@@ -362,8 +401,8 @@ async function getInsights(fbCampaignId, datePreset = 'last_7d', internalCampaig
     return res.data;
   }
 
-  const token = process.env.FB_ACCESS_TOKEN;
-  if (!token) throw new Error('FB_ACCESS_TOKEN must be set');
+  const token = credentials?.accessToken || process.env.FB_ACCESS_TOKEN;
+  if (!token) throw new Error('FB_ACCESS_TOKEN must be set (env or platform_connections)');
 
   const res = await axios.get(
     `https://graph.facebook.com/v24.0/${fbCampaignId}/insights`,
@@ -383,6 +422,7 @@ async function getInsights(fbCampaignId, datePreset = 'last_7d', internalCampaig
 }
 
 module.exports = {
+  getCredentialsForWorkspace,
   createFacebookCampaign,
   createFacebookAdSet,
   createFacebookAdCreative,

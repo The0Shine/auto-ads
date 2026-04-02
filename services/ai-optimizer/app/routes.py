@@ -23,6 +23,15 @@ async def health_check():
     }
 
 
+@optimizer_router.get("/health")
+async def optimizer_health():
+    return {
+        "status":    "ok",
+        "service":   "ai-optimizer",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
 # ─── Request models ───────────────────────────────────────────────────────────
 
 class OptimizationRequest(BaseModel):

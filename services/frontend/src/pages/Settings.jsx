@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Tabs, Card, Form, Input, Button, Switch, Typography, Space, Avatar, Descriptions, Alert, Row, Col, message, Divider } from 'antd';
+import { useState, useEffect } from 'react';
+import { Tabs, Card, Button, Switch, Typography, Space, Avatar, Descriptions, Alert, Tag, message, Divider } from 'antd';
 import { UserOutlined, BellOutlined, KeyOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
+import { campaignAPI } from '../api/campaign.api';
 
 const { Title, Text } = Typography;
 const CARD_STYLE = { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 12 };
@@ -28,8 +29,16 @@ function defaultPrefs() {
 export default function Settings() {
   const { user } = useAuth();
   const [prefs, setPrefs] = useState(defaultPrefs);
-  const fbToken     = localStorage.getItem('fb_access_token') || '';
-  const fbAccountId = localStorage.getItem('fb_ad_account_id') || '';
+  const [fbConn, setFbConn] = useState(null);
+
+  useEffect(() => {
+    campaignAPI.listPlatformConnections()
+      .then(({ data }) => {
+        const conn = (data.data || []).find(c => c.platform === 'facebook');
+        setFbConn(conn || null);
+      })
+      .catch(() => {});
+  }, []);
 
   const togglePref = (event, channel) => {
     const key = `${event}__${channel}`;
@@ -67,7 +76,7 @@ export default function Settings() {
                   <Descriptions.Item label="Họ và tên">{user?.full_name || '—'}</Descriptions.Item>
                   <Descriptions.Item label="Email">{user?.email || '—'}</Descriptions.Item>
                   <Descriptions.Item label="Trạng thái">
-                    {user?.is_active ? <Text style={{ color: '#00B894' }}>Hoạt động</Text> : <Text style={{ color: '#E17055' }}>Bị khóa</Text>}
+                    {user?.status === 'active' ? <Text style={{ color: '#00B894' }}>Hoạt động</Text> : <Text style={{ color: '#E17055' }}>Bị khóa</Text>}
                   </Descriptions.Item>
                   <Descriptions.Item label="Ngày tham gia">
                     {user?.created_at ? new Date(user.created_at).toLocaleDateString('vi') : '—'}
@@ -143,13 +152,24 @@ export default function Settings() {
               <Card style={CARD_STYLE}>
                 <Title level={5} style={{ color: '#E2E8F0' }}>Facebook</Title>
                 <Descriptions column={1} labelStyle={{ color: '#94A3B8', width: 140 }} contentStyle={{ color: '#E2E8F0' }}>
-                  <Descriptions.Item label="Ad Account ID">{fbAccountId || <Text style={{ color: '#636E72' }}>Chưa đặt</Text>}</Descriptions.Item>
-                  <Descriptions.Item label="Access Token">
-                    {fbToken
-                      ? <Text style={{ color: '#E2E8F0' }}>{fbToken.slice(0, 24)}…</Text>
-                      : <Text style={{ color: '#636E72' }}>Chưa có</Text>
-                    }
+                  <Descriptions.Item label="Trạng thái">
+                    {fbConn
+                      ? <Tag color="success">Đã kết nối</Tag>
+                      : <Tag color="default">Chưa kết nối</Tag>}
                   </Descriptions.Item>
+                  {fbConn && (
+                    <>
+                      <Descriptions.Item label="FB User ID">{fbConn.platform_user_id}</Descriptions.Item>
+                      <Descriptions.Item label="Token hết hạn">
+                        {fbConn.token_expires_at ? new Date(fbConn.token_expires_at).toLocaleDateString('vi') : '—'}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Ad Accounts">
+                        {(fbConn.ad_accounts || []).length > 0
+                          ? (fbConn.ad_accounts || []).map(a => <Tag key={a.id}>{a.id}</Tag>)
+                          : <Text style={{ color: '#636E72' }}>Không có (dùng env)</Text>}
+                      </Descriptions.Item>
+                    </>
+                  )}
                 </Descriptions>
                 <Button size="small" href="/platforms" style={{ marginTop: 8 }}>
                   Quản lý tại Platforms →
@@ -161,8 +181,8 @@ export default function Settings() {
                 <Descriptions column={1} labelStyle={{ color: '#94A3B8', width: 140 }} contentStyle={{ color: '#E2E8F0' }}>
                   <Descriptions.Item label="User ID">{user?.id || '—'}</Descriptions.Item>
                   <Descriptions.Item label="API Base URL">/api/v1</Descriptions.Item>
-                  <Descriptions.Item label="Workspace">
-                    {user?.workspace_id || '—'}
+                  <Descriptions.Item label="Workspace ID">
+                    {user?.id || '—'}
                   </Descriptions.Item>
                 </Descriptions>
               </Card>
