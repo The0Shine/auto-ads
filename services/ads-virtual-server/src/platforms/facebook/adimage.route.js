@@ -4,34 +4,39 @@
 // Mock:    accept URL → generate hash → store → return hash
 // =============================================================================
 
-const router  = require('express').Router();
-const crypto  = require('crypto');
+const router = require("express").Router();
+const crypto = require("crypto");
 
 // In-memory store: hash → image record
 const store = new Map();
 
 // POST / — Upload image, get hash (mirrors FB: POST /act_{id}/adimages)
 // Accepts: { url, name }  (mock: we receive URL instead of binary file)
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { url, name } = req.body;
-    if (!url) return res.status(400).json({
-      error: { message: 'url is required', type: 'OAuthException', code: 100 },
-    });
+    if (!url)
+      return res.status(400).json({
+        error: {
+          message: "url is required",
+          type: "OAuthException",
+          code: 100,
+        },
+      });
 
     // Generate deterministic hash from URL (same URL → same hash, like FB)
-    const hash = crypto.createHash('md5').update(url).digest('hex');
+    const hash = crypto.createHash("md5").update(url).digest("hex");
     const imgName = name || `img-${Date.now()}.jpg`;
 
     if (!store.has(hash)) {
       store.set(hash, {
         hash,
-        name:         imgName,
+        name: imgName,
         url,
-        width:        1200,
-        height:       628,
+        width: 1200,
+        height: 628,
         created_time: new Date().toISOString(),
-        id:           `mock_adaccount:${hash}`,
+        id: `mock_adaccount:${hash}`,
       });
     }
 
@@ -41,7 +46,7 @@ router.post('/', async (req, res) => {
         [imgName]: {
           hash,
           url,
-          width:  1200,
+          width: 1200,
           height: 628,
         },
       },
@@ -52,29 +57,34 @@ router.post('/', async (req, res) => {
 });
 
 // GET / — List uploaded images (mirrors FB: GET /act_{id}/adimages)
-router.get('/', (req, res) => {
-  const data = Array.from(store.values()).map(img => ({
-    hash:         img.hash,
-    name:         img.name,
-    url:          img.url,
-    width:        img.width,
-    height:       img.height,
+router.get("/", (req, res) => {
+  const data = Array.from(store.values()).map((img) => ({
+    hash: img.hash,
+    name: img.name,
+    url: img.url,
+    width: img.width,
+    height: img.height,
     created_time: img.created_time,
-    id:           img.id,
+    id: img.id,
   }));
 
   res.json({
     data,
-    paging: { cursors: { before: '', after: '' } },
+    paging: { cursors: { before: "", after: "" } },
   });
 });
 
 // GET /:hash — Get single image by hash
-router.get('/:hash', (req, res) => {
+router.get("/:hash", (req, res) => {
   const img = store.get(req.params.hash);
-  if (!img) return res.status(404).json({
-    error: { message: 'Invalid image hash', type: 'OAuthException', code: 100 },
-  });
+  if (!img)
+    return res.status(404).json({
+      error: {
+        message: "Invalid image hash",
+        type: "OAuthException",
+        code: 100,
+      },
+    });
   res.json(img);
 });
 
